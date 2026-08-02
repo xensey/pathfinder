@@ -1,0 +1,200 @@
+near6(A,b){
+    const n=6;
+    const M=A.map((r,i)=>r.concat(b[i]));
+    for(let c=0;c<n;c++){
+      let pivot=c;
+      for(let r=c+1;r<n;r++) if(Math.abs(M[r][c])>Math.abs(M[pivot][c])) pivot=r;
+      if(Math.abs(M[pivot][c])<1e-11) return null;
+      [M[c],M[pivot]]=[M[pivot],M[c]];
+      const d=M[c][c];
+      for(let j=c;j<=n;j++) M[c][j]/=d;
+      for(let r=0;r<n;r++) if(r!==c){
+        const f=M[r][c];
+        for(let j=c;j<=n;j++) M[r][j]-=f*M[c][j];
+      }
+    }
+    return M.map(r=>r[n]);
+  }
+
+  function initialPose(){
+    return add(trueRigPose(),[1.15,-.78,1.15,13*DEG,-10*DEG,8*DEG]);
+  }
+
+  function prepareSolver(){
+    let p=initialPose();
+    const history=[{pose:p.slice(),rmse:reprojectionRmse(p),cost:weightedCost(p)}];
+    const eps=[1e-3,1e-3,1e-3,1e-4,1e-4,1e-4];
+    let lambda=2e-2;
+
+    for(let iter=0;iter<38;iter++){
+      const pairs=residualPairs(p);
+      const r=pairs.flatMap(x=>[x.dx,x.dy]);
+      const J=Array.from({length:r.length},()=>Array(6).fill(0));
+
+      for(let j=0;j<6;j++){
+        const q=p.slice(); q[j]+=eps[j];
+        const rr=residualVector(q);
+        if(rr.length!==r.length) continue;
+        for(let row=0;row<r.length;row++) J[row][j]=(rr[row]-r[row])/eps[j];
+      }
+
+      const A=Array.from({length:6},()=>Array(6).fill(0));
+      const b=Array(6).fill(0);
+      for(let pairIndex=0;pairIndex<pairs.length;pairIndex++){
+        const pair=pairs[pairIndex];
+        const w=huberWeight(Math.hypot(pair.dx,pair.dy));
+        for(let axis=0;axis<2;axis++){
+          const row=pairIndex*2+axis;
+          for(let a=0;a<6;a++){
+            b[a]+=w*J[row][a]*r[row];
+            for(let c=0;c<6;c++) A[a][c]+=w*J[row][a]*J[row][c];
+          }
+        }
+      }
+      for(let j=0;j<6;j++) A[j][j]+=lambda;
+      const d=solveLinear6(A,b);
+      if(!d) break;
+      const candidate=p.map((v,j)=>v-d[j]);
+      const currentCost=weightedCost(p);
+      const candidateCost=weightedCost(candidate);
+      if(candidateCost < currentCost){
+        p=candidate;
+        lambda=Math.max(1e-7,lambda*.45);
+        history.push({pose:p.slice(),rmse:reprojectionRmse(p),cost:candidateCost});
+        if(mag(d)<1e-7) break;
+      }else{
+        lambda=Math.min(1e7,lambda*5.5);
+      }
+    }
+    state.history=history;
+  }
+
+  function rotationError(a,b){
+    const Q=matMul(rotation(a),transpose(rotation(b)));
+    const v=(Q[0][0]+Q[1][1]+Q[2][2]-1)/2;
+    return Math.acos(Math.max(-1,Math.min(1,v)))/DEG;
+  }
+
+  function currentEstimate(now){
+    if(state.stage<7) return null;
+    if(!state.history.length) prepareSolver();
+    if(state.stage===7) return state.history[0].pose;
+    if(state.stage===9 && !state.solving) return state.history[state.history.length-1].pose;
+    if(!state.solving) return state.history[state.history.length-1].pose;
+
+    const stepMs=760/Math.max(.1,state.speed);
+    const rawF=(now-state.solveStart)/stepMs;
+    const f=Number.isFinite(rawF)?Math.max(0,rawF):0;
+    const last=state.history.length-1;
+    const i=Math.max(0,Math.min(last,Math.floor(f)));
+    if(i>=last || !state.history[i] || !state.history[i+1]){
+      state.solving=false;
+      if(state.stage===8) setTimeout(()=>setStage(9,false),280);
+      return state.history[last].pose;
+    }
+    const t=Math.max(0,Math.min(1,f-i));
+    const smooth=t*t*(3-2*t);
+    return mix(state.history[i].pose,state.history[i+1].pose,smooth);
+  }
+
+  function currentIteration(now){
+    if(!state.history.length) return 0;
+    if(!state.solving) return state.stage===7?0:state.history.length-1;
+    return Math.min(state.history.length-1,Math.floor((now-state.solveStart)/(760/state.speed)));
+  }
+
+  function stageCopy(){
+    const t=task();
+    const two=state.cameraCount===2;
+    const cameraPhrase=two?'the calibrated camera rig':'the camera';
+    const taskSpecific={
+      generic:{
+        goal:'Recover where a known object and a camera are relative to one another. The same transform can be read as object pose in camera coordinates or, after inversion, camera pose in object coordinates.',
+        result:'The recovered transform can place an AR model, align a robot, localize a camera in a 3D map, or measure an object pose.'
+      },
+      eyeBoard:{
+        goal:'The scene camera sees a physically known calibration board. PnP recovers the board pose, so every printed fixation target can be expressed in scene-camera or glasses coordinates.',
+        result:'Transform the selected fixation target from board coordinates into scene-camera coordinates. Then fit the eye-feature or eye-model output so its gaze ray passes through that target.'
+      },
+      headPose:{
+        goal:'A remote eye tracker detects facial landmarks and matches them to a 3D face model. PnP recovers the rigid head/camera transform used to compensate head motion.',
+        result:'Use the recovered head pose to normalize eye features or transform a separately estimated gaze ray. Head pose is not itself the gaze direction.'
+      }
+    }[state.task];
+
+    return {
+      goal:{
+        title:'Define the real task',
+        text:taskSpecific.goal,
+        known:`The task definition and which coordinate frame is treated as the reference.`,
+        unknown:`The current rigid transform between ${t.frameName} and ${cameraPhrase}.`,
+        equation:'Question: where is the camera/object relative to the known model frame?',
+        details:[
+          ['--blue',`Reference: ${t.frameName}.`],
+          ['--purple',`Sensor: ${two?'two calibrated cameras':'one calibrated camera'}.`],
+          ['--green','Output has 6 DoF: x, y, z, yaw, pitch, roll.']
+        ],
+        callout:`PnP is a pose solver. It is not the landmark detector and it is not the gaze-calibration model.`
+      },
+      frames:{
+        title:'Choose coordinate systems',
+        text:`The 3D points are written in the ${t.frameName}. Camera pixels belong to an image frame, while projected rays live in a camera coordinate frame.`,
+        known:`Origin and axes of the ${t.frameName}; image axes u,v.`,
+        unknown:`The transform that carries 3D model coordinates into camera coordinates.`,
+        equation:'X_camera = R · X_model + t',
+        details:[
+          ['--point-1','Red/green/blue arrows show the model-frame X/Y/Z axes.'],
+          ['--blue','Each camera has its own optical center and forward axis.'],
+          ['--orange','Changing the reference frame changes interpretation, not the physical geometry.']
+        ],
+        callout:'OpenCV solvePnP commonly returns object-to-camera R,t. The camera center in object coordinates is obtained by inverting that transform.'
+      },
+      points:{
+        title:'Load known 3D landmark coordinates',
+        text:t.pointSource,
+        known:`Point identities and coordinates Xᵢ=(X,Y,Z) in the ${t.frameName}.`,
+        unknown:'Where those landmarks will appear in the current image.',
+        equation:'Known: X₁, X₂, …, Xₙ',
+        details:[
+          ['--point-1','Colored dots are not guessed by PnP; their 3D coordinates already exist.'],
+          ['--point-4',`This example uses ${points().length} landmarks.`],
+          ['--yellow',state.task==='eyeBoard'?'The yellow fixation target is also known in board coordinates, but is not required to be one of the PnP corners.':'The distribution of points affects pose stability.']
+        ],
+        callout:'This answers the original ambiguity: in classical PnP, the 3D point coordinates are inputs, not the unknowns.'
+      },
+      intrinsics:{
+        title:'Calibrate the camera model',
+        text:`The projection model needs focal lengths, principal point, and usually lens-distortion coefficients. ${two?'The fixed transform between Camera 1 and Camera 2 must also be calibrated.':''}`,
+        known:`K${two?'₁, K₂ and the rigid baseline/extrinsics':' and distortion coefficients'}.`,
+        unknown:'The current external pose R,t.',
+        equation:'x ∼ K · [R | t] · X',
+        details:[
+          ['--purple',`Current simulated focal length: ${Math.round(state.focal)} px.`],
+          ['--point-6','The principal point is shown by the cross at image center.'],
+          ['--red','Wrong intrinsics can produce low-looking pixel error but biased physical pose.']
+        ],
+        callout:state.task==='eyeBoard'?'Eye-camera intrinsics are calibrated too, but the board PnP shown here uses the scene/world-camera intrinsics.':'Intrinsics describe the camera itself; PnP estimates extrinsics for the current observation.'
+      },
+      detect:{
+        title:'Detect 2D image landmarks',
+        text:`The current image supplies pixel coordinates xᵢ=(uᵢ,vᵢ). A marker detector, corner detector, feature matcher, or neural landmark detector performs this step before PnP.`,
+        known:'Measured 2D positions and detection confidence.',
+        unknown:'The pose that caused those image positions.',
+        equation:'Measured now: x₁, x₂, …, xₙ',
+        details:[
+          ['--point-2','Colored rings are the noisy measured pixels.'],
+          ['--red','Occlusion removes measurements; image noise shifts them.'],
+          ['--purple',two?'Camera 2 contributes another image measurement set.':'Only one image measurement set is used.']
+        ],
+        callout:'PnP starts after detection. It does not normally search the raw image for these points.'
+      },
+      match:{
+        title:'Establish 3D↔2D correspondences',
+        text:'The solver must know which model point produced which image point. Matching labels and colors represent this identity relationship.',
+        known:'Pairs Xᵢ ↔ xᵢ for every accepted visible landmark.',
+        unknown:'Which pose jointly explains all accepted pairs.',
+        equation:'X_A ↔ x_A, X_B ↔ x_B, …',
+        details:[
+          ['--point-3','Same label and color means one correspondence.'],
+          ['--red','The wrong-match switch intentionally assigns one observation to the wrong place.'],
+          ['--green','Robust estimation can down-weight a large residual, but good matching remains 
