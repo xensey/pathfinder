@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PnP Explorer — Classical and Eye-Tracking Tasks</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <div>
+        <span class="eyebrow">Interactive computer-vision lesson</span>
+        <h1>PnP: what is known, what is unknown?</h1>
+        <p class="lead">Explore classical object pose and two direct eye-tracking uses of PnP. Switch between one camera and a calibrated two-camera rig, then watch the same six pose parameters satisfy all visible 2D–3D correspondences.</p>
+      </div>
+      <div class="selector-grid">
+        <label class="field">Task
+          <select id="taskSelect">
+            <option value="generic">Classical PnP — known 3D object</option>
+            <option value="eyeBoard" selected>Eye tracker — calibration-board pose</option>
+            <option value="headPose">Eye tracker — head pose from face landmarks</option>
+          </select>
+        </label>
+        <label class="field">PnP camera setup
+          <select id="cameraSelect">
+            <option value="1" selected>One camera — classical PnP</option>
+            <option value="2">Two calibrated cameras — joint rig PnP</option>
+          </select>
+        </label>
+        <div id="cameraMeaning" class="mode-note"></div>
+      </div>
+    </header>
+
+    <section class="truth-strip" aria-label="Known and unknown quantities">
+      <article class="truth-card" style="--accent:var(--blue)">
+        <div class="label">Known before PnP</div>
+        <strong id="known3DStrip">3D board coordinates Xᵢ</strong>
+        <small id="known3DSource">From the printed board geometry.</small>
+      </article>
+      <article class="truth-card" style="--accent:var(--purple)">
+        <div class="label">Measured now</div>
+        <strong>2D image pixels xᵢ = (uᵢ,vᵢ)</strong>
+        <small>Detected in the current camera image.</small>
+      </article>
+      <article class="truth-card" style="--accent:var(--orange)">
+        <div class="label">Also known</div>
+        <strong>K, distortion, correspondences</strong>
+        <small id="rigKnownStrip">For two cameras, their fixed relative transform is known too.</small>
+      </article>
+      <article class="truth-card" style="--accent:var(--green)">
+        <div class="label">Unknown solved by PnP</div>
+        <strong>Pose R, t</strong>
+        <small id="unknownStrip">Board relative to the scene camera.</small>
+      </article>
+    </section>
+
+    <section class="stage-shell">
+      <div id="stageTabs" class="stage-tabs" aria-label="Explanation stages"></div>
+      <div class="nav-buttons">
+        <button id="prevBtn" class="btn small" type="button">← Previous</button>
+        <button id="tourBtn" class="btn primary small" type="button">▶ Guided tour</button>
+        <button id="nextBtn" class="btn small" type="button">Next →</button>
+      </div>
+    </section>
+
+    <main class="layout">
+      <section class="visual-card">
+        <canvas id="sceneCanvas" aria-label="Animated PnP visualization"></canvas>
+        <div class="metrics">
+          <div class="metric"><span>Mode</span><strong id="modeMetric">Classical PnP</strong><small id="modeMetricSub">one optical center</small></div>
+          <div class="metric"><span>Known 3D points</span><strong id="pointMetric">8</strong><small>object/model coordinates</small></div>
+          <div class="metric"><span>Visible matches</span><strong id="matchMetric">8</strong><small id="constraintMetric">16 scalar constraints</small></div>
+          <div class="metric"><span>Reprojection RMSE</span><strong id="rmseMetric">—</strong><small>pixels</small></div>
+          <div class="metric"><span>Rotation error</span><strong id="rotMetric">—</strong><small>degrees</small></div>
+          <div class="metric"><span>Position error</span><strong id="posMetric">—</strong><small>model units</small></div>
+        </div>
+        <div class="legend">
+          <span><i style="--c:var(--blue)"></i>Camera 1 / true pose</span>
+          <span><i style="--c:var(--purple)"></i>Camera 2</span>
+          <span><i style="--c:var(--green)"></i>Current estimate</span>
+          <span><i style="--c:var(--red)"></i>Reprojection residual</span>
+          <span><i style="--c:var(--yellow)"></i>Gaze-calibration target/ray</span>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <section class="side-card">
+          <span id="stageBadge" class="badge">Stage 1 of 10</span>
+          <h2 id="stageTitle">Task goal</h2>
+          <p id="stageText"></p>
+          <div class="ku-grid">
+            <div class="ku"><div class="k">Known at this stage</div><div id="knownStage" class="v"></div></div>
+            <div class="ku"><div class="k">Still unknown</div><div id="unknownStage" class="v"></div></div>
+          </div>
+          <div id="equation" class="equation"></div>
+          <div id="detailList" class="detail-list"></div>
+          <div id="stageCallout" class="callout"></div>
+        </section>
+
+        <section class="side-card">
+          <div class="control-head">
+            <h3>Experiment</h3>
+            <button id="randomBtn" class="btn small" type="button">Random pose</button>
+          </div>
+          <div id="sliderList" class="slider-list"></div>
+          <div class="toggle-list">
+            <label class="toggle"><input id="occlusionToggle" type="checkbox" /> Hide two points in Camera 1</label>
+            <label class="toggle"><input id="outlierToggle" type="checkbox" /> Create one wrong correspondence</label>
+            <label class="toggle"><input id="robustToggle" type="checkbox" checked /> Use robust Huber weighting</label>
+            <label class="toggle"><input id="rayToggle" type="checkbox" checked /> Animate projection rays</label>
+          </div>
+          <div class="button-grid">
+            <button id="solveBtn" class="btn primary" type="button">▶ Run pose solver</button>
+            <button id="resetBtn" class="btn" type="button">Reset</button>
+          </div>
+          <div id="experimentNote" class="callout"></div>
+        </section>
+      </aside>
+    </main>
+
+    <section class="lower-grid">
+      <article class="info-card">
+        <h3 id="pointSourceTitle">Where the 3D points come from</h3>
+        <p id="pointSourceText"></p>
+        <div style="overflow:auto;margin-top:10px">
+          <table class="point-table">
+            <thead><tr><th>Point</th><th>X</th><th>Y</th><th>Z</th></tr></thead>
+            <tbody id="pointTableBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="info-card">
+        <h3>What the software pipeline does</h3>
+        <div id="pipeline" class="pipeline"></div>
+      </article>
+
+      <article class="info-card">
+        <h3 id="eyeLinkTitle">Where PnP ends</h3>
+        <p id="eyeLinkText"></p>
+        <div id="eyeLinkCallout" class="callout"></div>
+      </article>
+    </section>
+
+    <div class="footer-note">Standalone HTML · no external libraries · drag the 3D view to orbit and use the mouse wheel to zoom.</div>
+  </div>
+
+<script>
+Promise.all(['app-1.txt','app-2.txt','app-3.txt','app-4.txt','app-5.txt'].map(p=>fetch(p).then(r=>{if(!r.ok)throw new Error(p+' '+r.status);return r.text()})))
+.then(parts=>(0,eval)(parts.join('')))
+.catch(err=>{document.body.insertAdjacentHTML('beforeend','<pre style="padding:16px;color:#b91c1c">Failed to load app: '+String(err)+'</pre>')});
+</script>
+</body>
+</html>
