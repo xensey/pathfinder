@@ -1,0 +1,223 @@
+
+(() => {
+  'use strict';
+
+  const root = document;
+  const $ = id => root.getElementById(id);
+  const canvas = $('sceneCanvas');
+  const ctx = canvas.getContext('2d');
+  const DEG = Math.PI / 180;
+  const IMG_W = 640;
+  const IMG_H = 480;
+
+  const COLOR_VARS = ['--point-1','--point-2','--point-3','--point-4','--point-5','--point-6','--point-7','--point-8'];
+
+  const TASKS = {
+    generic: {
+      name: 'Classical PnP — known 3D object',
+      short: 'known object',
+      frameName: 'object/CAD frame',
+      cameraLabel: 'camera',
+      pointSource: 'The coordinates normally come from CAD, metrology, a marker definition, or a previously reconstructed 3D map. The detector must then identify the same physical landmarks in the current image.',
+      known3D: '3D object coordinates Xᵢ',
+      known3DSource: 'From CAD, measurement, marker geometry, or a 3D map.',
+      unknown: 'Camera/object relative pose.',
+      cameraMeaning1: 'One camera uses ordinary Perspective-n-Point: one set of 3D↔2D correspondences estimates one six-degree-of-freedom pose.',
+      cameraMeaning2: 'Two calibrated cameras contribute two image sets to one rigid-rig pose. Their intrinsics and fixed baseline/extrinsics are known.',
+      eyeLinkTitle: 'Where PnP ends',
+      eyeLinkText: 'PnP returns a rigid transform. The downstream application may use it for robot grasping, AR overlay, inspection, or camera localization.',
+      eyeLinkCallout: 'It does not detect the landmarks or decide their identities; those are earlier pipeline stages.',
+      points: [
+        [-1.55,-1.05,-.85],[1.45,-.95,-.55],[-1.35,1.02,.55],[1.30,.92,1.02],
+        [0,-.20,1.58],[.18,.25,-1.42],[-.65,.45,.15],[.78,-.45,.28]
+      ],
+      labels: ['A','B','C','D','E','F','G','H'],
+      edges: [[0,1],[0,2],[1,3],[2,3],[0,5],[1,5],[2,4],[3,4],[4,6],[5,7],[6,7]],
+      target: null
+    },
+    eyeBoard: {
+      name: 'Eye tracker — calibration-board pose',
+      short: 'calibration board',
+      frameName: 'board frame',
+      cameraLabel: 'scene/world camera',
+      pointSource: 'The printed ChArUco, checkerboard, AprilTag grid, or custom fixation board has measured dimensions. Corner/intersection coordinates are therefore known in millimetres before any image is taken.',
+      known3D: '3D board-corner coordinates Xᵢ',
+      known3DSource: 'From the physical calibration-board design.',
+      unknown: 'Board pose relative to the world camera.',
+      cameraMeaning1: 'Typical wearable setup: one scene/world camera sees the known board. The eye cameras are not part of this particular PnP solve.',
+      cameraMeaning2: 'Optional stereo scene-camera rig: both calibrated world cameras observe the board and jointly constrain one rig pose.',
+      eyeLinkTitle: 'PnP supplies the target; gaze calibration is the next problem',
+      eyeLinkText: 'After PnP locates the board, a fixation target with known board coordinates can be transformed into the scene-camera or glasses coordinate frame. Eye images are then used to fit a gaze model toward that target.',
+      eyeLinkCallout: 'PnP does not estimate the gaze ray from pupil/glint features. It supplies the 3D target location that the gaze-calibration optimizer should hit.',
+      points: [
+        [-2.25,-1.35,0],[0,-1.35,0],[2.25,-1.35,0],[-2.25,0,0],
+        [2.25,0,0],[-2.25,1.35,0],[0,1.35,0],[2.25,1.35,0]
+      ],
+      labels: ['C1','C2','C3','C4','C5','C6','C7','C8'],
+      edges: [[0,1],[1,2],[0,3],[2,4],[3,4],[3,5],[4,7],[5,6],[6,7],[1,6]],
+      target: [0,.52,0]
+    },
+    headPose: {
+      name: 'Eye tracker — head pose from face landmarks',
+      short: '3D face model',
+      frameName: 'face/head frame',
+      cameraLabel: 'remote eye-tracker camera',
+      pointSource: 'A generic or person-specific 3D face model supplies approximate coordinates for eye corners, nose, mouth corners, chin, and other stable landmarks. A 2D face-landmark detector finds them in the current image.',
+      known3D: '3D face-model landmarks Xᵢ',
+      known3DSource: 'From a generic or calibrated face model.',
+      unknown: 'Head pose relative to the tracker camera.',
+      cameraMeaning1: 'One remote camera can estimate head pose from 3D face-model points and their detected 2D locations.',
+      cameraMeaning2: 'Two calibrated remote cameras jointly estimate the rigid camera/head transform with more coverage and redundancy.',
+      eyeLinkTitle: 'Head pose helps gaze estimation, but is not gaze itself',
+      eyeLinkText: 'The recovered head rotation and translation can normalize eye features, compensate head motion, or transform a gaze ray between head and camera coordinates.',
+      eyeLinkCallout: 'A generic face model can introduce scale and translation bias. The pupil-to-gaze mapping or physical eye model remains a separate calibration problem.',
+      points: [
+        [-1.05,.56,.03],[1.05,.56,.03],[0,.12,.58],[-.72,-.50,.12],
+        [.72,-.50,.12],[0,-1.28,-.08],[-1.38,.05,-.14],[1.38,.05,-.14]
+      ],
+      labels: ['LE','RE','N','LM','RM','CH','LJ','RJ'],
+      edges: [[0,1],[0,2],[1,2],[2,3],[2,4],[3,4],[3,5],[4,5],[0,6],[1,7],[6,5],[7,5]],
+      target: null
+    }
+  };
+
+  const STAGES = [
+    {key:'goal', short:'Goal'},
+    {key:'frames', short:'Frames'},
+    {key:'points', short:'3D points'},
+    {key:'intrinsics', short:'Intrinsics'},
+    {key:'detect', short:'Detect 2D'},
+    {key:'match', short:'Match'},
+    {key:'unknown', short:'Unknown'},
+    {key:'guess', short:'Initial guess'},
+    {key:'solve', short:'Solve'},
+    {key:'result', short:'Use result'}
+  ];
+
+  const defaults = {
+    task:'eyeBoard', cameraCount:1, stage:0,
+    depth:-8.2, yaw:7, pitch:-4, roll:2,
+    focal:735, baseline:2.0, noise:1.0, speed:1,
+    occlusion:false, outlier:false, robust:true, rays:true,
+    viewAz:-.62, viewEl:.38, viewZoom:40,
+    solving:false, history:[], solveStart:0, drag:null,
+    tour:false, tourTimer:null, seed:1
+  };
+  const state = {...defaults};
+
+  const sliderDefs = [
+    ['depth','Camera distance',-11,-5,.1,''],
+    ['yaw','Yaw',-24,24,.5,'°'],
+    ['pitch','Pitch',-20,20,.5,'°'],
+    ['roll','Roll',-18,18,.5,'°'],
+    ['focal','Focal length',430,1050,10,' px'],
+    ['baseline','Two-camera baseline',.5,4,.1,' units'],
+    ['noise','2D detection noise',0,6,.25,' px'],
+    ['speed','Animation speed',.5,2.5,.1,'×']
+  ];
+
+  function css(name){
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#777';
+  }
+  function task(){ return TASKS[state.task]; }
+  function points(){ return task().points; }
+  function labels(){ return task().labels; }
+  function add(a,b){ return a.map((v,i)=>v+b[i]); }
+  function sub(a,b){ return a.map((v,i)=>v-b[i]); }
+  function scale(a,s){ return a.map(v=>v*s); }
+  function mix(a,b,t){ return a.map((v,i)=>v+(b[i]-v)*t); }
+  function mag(a){ return Math.hypot(...a); }
+  function matMul(A,B){ return A.map(r=>B[0].map((_,j)=>r.reduce((s,v,k)=>s+v*B[k][j],0))); }
+  function matVec(A,v){ return A.map(r=>r.reduce((s,x,i)=>s+x*v[i],0)); }
+  function transpose(A){ return A[0].map((_,i)=>A.map(r=>r[i])); }
+
+  function rotation(p){
+    const yaw=p[3], pitch=p[4], roll=p[5];
+    const cy=Math.cos(yaw), sy=Math.sin(yaw);
+    const cp=Math.cos(pitch), sp=Math.sin(pitch);
+    const cr=Math.cos(roll), sr=Math.sin(roll);
+    const Ry=[[cy,0,sy],[0,1,0],[-sy,0,cy]];
+    const Rx=[[1,0,0],[0,cp,-sp],[0,sp,cp]];
+    const Rz=[[cr,-sr,0],[sr,cr,0],[0,0,1]];
+    return matMul(Rz,matMul(Rx,Ry));
+  }
+
+  function worldToCamera(P,p){ return matVec(rotation(p),sub(P,p.slice(0,3))); }
+  function localToWorld(P,p){ return add(p.slice(0,3),matVec(transpose(rotation(p)),P)); }
+
+  function trueRigPose(){
+    return [.28,.12,state.depth,state.yaw*DEG,state.pitch*DEG,state.roll*DEG];
+  }
+
+  function cameraPose(rig,cam){
+    if(state.cameraCount===1) return rig.slice();
+    const local=[(cam===0?-1:1)*state.baseline/2,0,0];
+    const C=localToWorld(local,rig);
+    return [C[0],C[1],C[2],rig[3],rig[4],rig[5]];
+  }
+
+  function project(P,rig,cam){
+    const q=worldToCamera(P,cameraPose(rig,cam));
+    if(q[2] <= .08) return null;
+    return [IMG_W/2 + state.focal*q[0]/q[2], IMG_H/2 + state.focal*q[1]/q[2]];
+  }
+
+  function deterministicNoise(i,cam,axis){
+    const a=(i+1)*12.9898+(cam+1)*41.731+(axis+1)*77.113+state.seed*3.17;
+    const b=(i+4)*5.123+(cam+2)*17.311+(axis+2)*23.77+state.seed*.91;
+    const u=Math.sin(a)*43758.5453;
+    const v=Math.sin(b)*19341.173;
+    return ((u-Math.floor(u))+(v-Math.floor(v))-1)*state.noise*1.35;
+  }
+
+  function isOccluded(i,cam){
+    if(!state.occlusion || cam!==0) return false;
+    if(state.task==='headPose') return i===5 || i===6;
+    return i===points().length-1 || i===points().length-2;
+  }
+
+  function observation(i,cam){
+    if(isOccluded(i,cam)) return null;
+    const ideal=project(points()[i],trueRigPose(),cam);
+    if(!ideal) return null;
+    const bad=state.outlier && cam===0 && i===3 ? [72,-55] : [0,0];
+    return [ideal[0]+deterministicNoise(i,cam,0)+bad[0], ideal[1]+deterministicNoise(i,cam,1)+bad[1]];
+  }
+
+  function activeCameras(){ return state.cameraCount===2 ? [0,1] : [0]; }
+
+  function residualPairs(p){
+    const out=[];
+    for(const cam of activeCameras()){
+      points().forEach((P,i)=>{
+        const o=observation(i,cam);
+        const q=project(P,p,cam);
+        if(o && q) out.push({cam,i,dx:q[0]-o[0],dy:q[1]-o[1]});
+      });
+    }
+    return out;
+  }
+
+  function residualVector(p){
+    return residualPairs(p).flatMap(r=>[r.dx,r.dy]);
+  }
+
+  function huberWeight(error,delta=13){
+    if(!state.robust || error<=delta) return 1;
+    return delta/Math.max(delta,error);
+  }
+
+  function weightedCost(p){
+    return residualPairs(p).reduce((sum,r)=>{
+      const e=Math.hypot(r.dx,r.dy);
+      return sum+huberWeight(e)*(r.dx*r.dx+r.dy*r.dy);
+    },0);
+  }
+
+  function reprojectionRmse(p){
+    const rs=residualPairs(p);
+    if(!rs.length) return NaN;
+    return Math.sqrt(rs.reduce((s,r)=>s+r.dx*r.dx+r.dy*r.dy,0)/(2*rs.length));
+  }
+
+  function solveLi
