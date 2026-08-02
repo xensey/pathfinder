@@ -1,0 +1,189 @@
+essential.']
+        ],
+        callout:'For AprilTag/ChArUco, IDs make matching explicit. For natural objects or faces, a detector or feature matcher supplies the identities.'
+      },
+      unknown:{
+        title:'Identify the actual unknown',
+        text:`At the PnP call, the 3D coordinates, 2D coordinates, camera calibration, and correspondences are available. The unknown is the one rigid pose of ${cameraPhrase}.`,
+        known:'Xᵢ, xᵢ, K, distortion, point identities'+(two?', and camera-to-camera calibration.':'.'),
+        unknown:'Rotation R and translation t — six parameters.',
+        equation:'Unknown: R (3 DoF) + t (3 DoF)',
+        details:[
+          ['--green','Translation determines position.'],
+          ['--orange','Rotation determines yaw, pitch, and roll.'],
+          ['--purple',two?'Both cameras share one rig pose; Camera 2 does not add six new unknowns.':'One camera contributes one optical center.']
+        ],
+        callout:state.task==='headPose'?'The returned transform can be inverted and described as head pose relative to the camera.':'The same physical relation can be described as camera pose in model coordinates or model pose in camera coordinates.'
+      },
+      guess:{
+        title:'Start from a pose hypothesis',
+        text:'A minimal solver, EPnP/IPPE, the previous video frame, or a rough initialization supplies a first pose. Its reprojected points usually miss the measured pixels.',
+        known:'An initial candidate R₀,t₀ and all measurement data.',
+        unknown:'How the pose must move to reduce image residuals.',
+        equation:'Predict: x̂ᵢ = project(K, R₀, t₀, Xᵢ)',
+        details:[
+          ['--orange','Dashed orange/green geometry is the initial estimate.'],
+          ['--red','Residual lines connect predicted crosses to measured rings.'],
+          ['--purple','Planar boards can have competing pose hypotheses, so initialization and the correct planar solver matter.']
+        ],
+        callout:'Press “Run pose solver” or advance to the Solve stage to animate real numerical reprojection minimization.'
+      },
+      solve:{
+        title:'Minimize reprojection error',
+        text:`Each iteration changes the same six pose parameters, reprojects every known 3D point into ${two?'both images':'the image'}, and reduces the residual vectors.`,
+        known:'Measured pixels and predictions produced by the current pose.',
+        unknown:'The pose with the lowest robust reprojection cost.',
+        equation:'min R,t Σc Σi ρ( ‖x_c,i − π(K_c,R,t,X_i)‖² )',
+        details:[
+          ['--green','The dashed estimated rig moves toward the solid true rig.'],
+          ['--red','Residual vectors shrink in the image panels.'],
+          ['--purple',state.robust?'Huber weighting reduces the influence of a very large residual.':'Every residual currently has full least-squares weight.']
+        ],
+        callout:two?'This is joint multi-camera/generalized PnP: two optical centers constrain one known rigid camera rig.':'This is classical single-camera PnP followed by iterative pose refinement.'
+      },
+      result:{
+        title:'Use and validate the recovered transform',
+        text:taskSpecific.result,
+        known:'Estimated R̂,t̂, per-point residuals, and which observations were down-weighted.',
+        unknown:'True physical accuracy unless checked against independent ground truth or repeated validation.',
+        equation:state.task==='eyeBoard'?'P_target^camera = T_camera←board · P_target^board':'Output: R̂,t̂ → a 6-DoF rigid transform',
+        details:[
+          ['--green','Estimated and true camera geometry should nearly overlap.'],
+          ['--red','Inspect isolated and systematic residuals rather than RMSE alone.'],
+          ['--yellow',state.task==='eyeBoard'?'The yellow line shows the separate gaze-calibration relation to the recovered target.':state.task==='headPose'?'Head pose supports gaze compensation; it is not the gaze vector.':'The transform can now be consumed by the downstream system.']
+        ],
+        callout:t.eyeLinkCallout
+      }
+    }[STAGES[state.stage].key];
+  }
+
+  function buildStageTabs(){
+    STAGES.forEach((s,i)=>{
+      const b=document.createElement('button');
+      b.type='button';
+      b.className='stage-btn';
+      b.innerHTML=`<span class="stage-num">${i+1}</span><span class="stage-label">${s.short}</span>`;
+      b.addEventListener('click',()=>setStage(i,true));
+      $('stageTabs').appendChild(b);
+    });
+  }
+
+  function buildSliders(){
+    sliderDefs.forEach(([key,label,min,max,step,unit])=>{
+      const row=document.createElement('label');
+      row.className='slider-row';
+      row.id=`${key}Row`;
+      row.innerHTML=`<span class="slider-top"><span>${label}</span><output id="${key}Out"></output></span><input id="${key}Slider" type="range" min="${min}" max="${max}" step="${step}" />`;
+      $('sliderList').appendChild(row);
+      $(`${key}Slider`).addEventListener('input',e=>{
+        state[key]=+e.target.value;
+        invalidateSolution();
+        syncUI();
+      });
+    });
+  }
+
+  function invalidateSolution(){
+    state.solving=false;
+    state.history=[];
+  }
+
+  function setStage(index,autoSolve=true){
+    state.stage=Math.max(0,Math.min(STAGES.length-1,index));
+    if(state.stage>=7 && !state.history.length) prepareSolver();
+    if(state.stage===8 && autoSolve){
+      state.solving=true;
+      state.solveStart=performance.now();
+    }else if(state.stage!==8){
+      state.solving=false;
+    }
+    syncUI();
+  }
+
+  function visibleMatchCount(){
+    let n=0;
+    activeCameras().forEach(cam=>points().forEach((_,i)=>{ if(observation(i,cam)) n++; }));
+    return n;
+  }
+
+  function updatePointTable(){
+    $('pointTableBody').innerHTML=points().map((p,i)=>`<tr><td><strong>${labels()[i]}</strong></td><td>${p[0].toFixed(2)}</td><td>${p[1].toFixed(2)}</td><td>${p[2].toFixed(2)}</td></tr>`).join('');
+  }
+
+  function updatePipeline(){
+    const items=[
+      'Load known 3D model coordinates',
+      'Calibrate camera intrinsics'+(state.cameraCount===2?' and rig extrinsics':''),
+      'Detect 2D landmarks in the current image'+(state.cameraCount===2?'s':''),
+      'Match every 2D observation to its 3D identity',
+      'Solve and refine one 6-DoF pose',
+      state.task==='eyeBoard'?'Use the recovered 3D target for gaze calibration':state.task==='headPose'?'Use head pose to normalize/transform gaze':'Use pose in the downstream CV system'
+    ];
+    const stageToPipe=[0,0,0,1,2,3,4,4,4,5][state.stage];
+    $('pipeline').innerHTML=items.map((x,i)=>`<div class="pipe-step ${i===stageToPipe?'active':''}" data-step="${i+1}">${x}</div>`).join('');
+  }
+
+  function syncUI(){
+    const t=task();
+    const copy=stageCopy();
+    [...$('stageTabs').children].forEach((b,i)=>b.classList.toggle('active',i===state.stage));
+    $('stageBadge').textContent=`Stage ${state.stage+1} of ${STAGES.length}`;
+    $('stageTitle').textContent=copy.title;
+    $('stageText').textContent=copy.text;
+    $('knownStage').textContent=copy.known;
+    $('unknownStage').textContent=copy.unknown;
+    $('equation').textContent=copy.equation;
+    $('detailList').innerHTML=copy.details.map(([c,text])=>`<div class="detail"><i style="--detail:var(${c})"></i><span>${text}</span></div>`).join('');
+    $('stageCallout').textContent=copy.callout;
+
+    $('taskSelect').value=state.task;
+    $('cameraSelect').value=String(state.cameraCount);
+    $('cameraMeaning').textContent=state.cameraCount===1?t.cameraMeaning1:t.cameraMeaning2;
+    $('known3DStrip').textContent=t.known3D;
+    $('known3DSource').textContent=t.known3DSource;
+    $('rigKnownStrip').textContent=state.cameraCount===2?'K₁, K₂ and the fixed camera-to-camera transform are known.':'One calibrated camera matrix K is used.';
+    $('unknownStrip').textContent=t.unknown;
+
+    $('pointSourceTitle').textContent=`Where the ${t.short} 3D points come from`;
+    $('pointSourceText').textContent=t.pointSource;
+    $('eyeLinkTitle').textContent=t.eyeLinkTitle;
+    $('eyeLinkText').textContent=t.eyeLinkText;
+    $('eyeLinkCallout').textContent=t.eyeLinkCallout;
+
+    $('modeMetric').textContent=state.cameraCount===1?'Classical PnP':'Joint rig PnP';
+    $('modeMetricSub').textContent=state.cameraCount===1?'one optical center':'two calibrated optical centers';
+    $('pointMetric').textContent=points().length;
+    const matches=visibleMatchCount();
+    $('matchMetric').textContent=matches;
+    $('constraintMetric').textContent=`${matches*2} scalar constraints for 6 unknowns`;
+
+    sliderDefs.forEach(([key,,,,step,unit])=>{
+      $(`${key}Slider`).value=state[key];
+      $(`${key}Out`).textContent=state[key].toFixed(step<1?2:0)+unit;
+    });
+    $('baselineRow').style.display=state.cameraCount===2?'grid':'none';
+    $('occlusionToggle').checked=state.occlusion;
+    $('outlierToggle').checked=state.outlier;
+    $('robustToggle').checked=state.robust;
+    $('rayToggle').checked=state.rays;
+    $('tourBtn').textContent=state.tour?'■ Stop tour':'▶ Guided tour';
+
+    const noteParts=[];
+    if(state.outlier) noteParts.push(state.robust?'The large wrong match will be down-weighted during refinement.':'The wrong match has full least-squares influence and may pull the pose away.');
+    if(state.occlusion) noteParts.push('Camera 1 has two fewer correspondences.');
+    if(state.cameraCount===2) noteParts.push('Camera 2 still constrains the same six rig-pose unknowns.');
+    if(!noteParts.length) noteParts.push('Change noise, occlusion, or matching, then compare one camera with two cameras.');
+    $('experimentNote').textContent=noteParts.join(' ');
+    $('experimentNote').classList.toggle('warning',state.outlier&&!state.robust);
+
+    updatePointTable();
+    updatePipeline();
+  }
+
+  function resizeCanvas(){
+    const d=Math.min(2,window.devicePixelRatio||1);
+    const r=canvas.getBoundingClientRect();
+    canvas.width=Math.round(r.width*d);
+    canvas.height=Math.round(r.height*d);
+    ctx.setTransform(d,0,0,d,0,0);
+    return {w:r.width,h:r.h
