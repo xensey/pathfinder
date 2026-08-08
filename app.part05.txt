@@ -1,0 +1,132 @@
+ted" style="margin-top:8px">Осталось проверок: <span id="probeLeft">${maxProbes}</span></div>
+      <div class="probe-log" id="probeLog"></div>
+      <div id="ruleChoices" class="hidden" style="margin-top:24px">
+        <strong>Какое правило наиболее вероятно?</strong>
+        <div class="choice-grid" style="margin-top:12px">
+          <button class="choice" data-rule="plus3">Каждый раз прибавляется 3</button>
+          <button class="choice" data-rule="arith">Любая арифметическая прогрессия</button>
+          <button class="choice" data-rule="increasing">Каждое следующее число больше предыдущего</button>
+          <button class="choice" data-rule="sum">Сумма трёх чисел меньше 30</button>
+          <button class="choice" data-rule="pattern">Чётное — нечётное — чётное</button>
+        </div>
+        ${confidenceBlock('hypothesis')}
+        <div class="row" style="margin-top:18px"><button class="btn" id="submitRule" disabled>Ответить</button></div>
+      </div>`);
+    const log=document.getElementById('probeLog');
+    function revealChoices(){
+      document.getElementById('ruleChoices').classList.remove('hidden'); wireConfidence('hypothesis');
+      let chosen=null;
+      document.querySelectorAll('[data-rule]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-rule]').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');chosen=b.dataset.rule;document.getElementById('submitRule').disabled=false;}));
+      document.getElementById('submitRule').addEventListener('click',()=>{
+        const finalCorrect=chosen==='increasing';
+        const hasPositiveNonArithmetic=state.hypothesisProbes.some(p=>p.fits && (p.b-p.a)!==(p.c-p.b));
+        const hasNegativeProbe=state.hypothesisProbes.some(p=>!p.fits);
+        let score=(finalCorrect?2:0)+(hasPositiveNonArithmetic?1:0)+(hasNegativeProbe?1:0);
+        addResult('hypothesis','Проверка гипотез',score,4,{probes:state.hypothesisProbes,chosen,correct:'increasing',hasPositiveNonArithmetic,hasNegativeProbe,confidence:getConfidence('hypothesis')});
+        task10Planning();
+      });
+    }
+    document.getElementById('checkProbe').addEventListener('click',()=>{
+      const raw=[document.getElementById('p1').value.trim(),document.getElementById('p2').value.trim(),document.getElementById('p3').value.trim()];
+      if(raw.some(v=>v==='')) return;
+      const [a,b,c]=raw.map(Number);
+      if(![a,b,c].every(Number.isFinite)) return;
+      const fits=a<b&&b<c;
+      state.hypothesisProbes.push({a,b,c,fits});
+      log.innerHTML += `<div class="probe-entry ${fits?'yes':'no'}"><span>${a} — ${b} — ${c}</span><strong>${fits?'подходит':'не подходит'}</strong></div>`;
+      document.getElementById('p1').value='';document.getElementById('p2').value='';document.getElementById('p3').value='';
+      document.getElementById('probeLeft').textContent=maxProbes-state.hypothesisProbes.length;
+      if(state.hypothesisProbes.length>=maxProbes){document.getElementById('checkProbe').disabled=true;revealChoices();}
+    });
+  }
+
+  function task10Planning() {
+    startTask(10);
+    const steps = [
+      {id:'id', text:'Присвоить образцу идентификатор'},
+      {id:'cal', text:'Откалибровать измерительный прибор'},
+      {id:'measure', text:'Измерить образец'},
+      {id:'qc', text:'Проверить качество полученных данных'},
+      {id:'export', text:'Экспортировать итоговый файл'},
+      {id:'backup', text:'Создать резервную копию экспортированного файла'}
+    ];
+    const shuffled=shuffle(steps); let order=[];
+    renderShell(10, `
+      <div class="stage-kicker">Планирование</div>
+      <h2>Составьте допустимую последовательность</h2>
+      <div class="logic-box">
+        До измерения образцу нужно присвоить идентификатор и откалибровать прибор.<br>
+        Проверка качества выполняется после измерения.<br>
+        Экспорт допускается только после проверки качества.<br>
+        Резервная копия создаётся после экспорта.
+      </div>
+      <div class="answer-strip" id="planStrip"><span class="muted">Нажимайте шаги в нужном порядке</span></div>
+      <div class="step-list">${shuffled.map(s=>`<button class="step-item" data-id="${s.id}">${s.text}</button>`).join('')}</div>
+      <div class="row" style="margin-top:18px"><button class="btn secondary" id="resetPlan">Сбросить</button><button class="btn" id="submitPlan" disabled>Ответить</button></div>
+      ${confidenceBlock('planning')}`);
+    wireConfidence('planning');
+    function redraw(){
+      document.getElementById('planStrip').innerHTML=order.length?order.map((id,i)=>`<span class="answer-chip" style="font-size:14px">${i+1}. ${steps.find(s=>s.id===id).text}</span>`).join(''):'<span class="muted">Нажимайте шаги в нужном порядке</span>';
+      document.querySelectorAll('.step-item').forEach(b=>b.classList.toggle('used',order.includes(b.dataset.id)));
+      document.getElementById('submitPlan').disabled=order.length!==steps.length;
+    }
+    document.querySelectorAll('.step-item').forEach(b=>b.addEventListener('click',()=>{if(!order.includes(b.dataset.id)){order.push(b.dataset.id);redraw();}}));
+    document.getElementById('resetPlan').addEventListener('click',()=>{order=[];redraw();});
+    document.getElementById('submitPlan').addEventListener('click',()=>{
+      const pos=Object.fromEntries(order.map((id,i)=>[id,i]));
+      const constraints=[pos.id<pos.measure,pos.cal<pos.measure,pos.measure<pos.qc,pos.qc<pos.export,pos.export<pos.backup];
+      const satisfied=constraints.filter(Boolean).length;
+      addResult('planning','Планирование последовательности',satisfied,5,{order,constraints,confidence:getConfidence('planning')});
+      task11DelayedRecall();
+    });
+  }
+
+  function task11DelayedRecall() {
+    startTask(11);
+    let idx=0, answers=[];
+    const questions=shuffle(state.pairs.map(p=>({code:p.code,correct:p.name})));
+    const renderQuestion=()=>{
+      if(idx>=questions.length){
+        const score=answers.filter(a=>a.correct).length;
+        addResult('delayed','Отсроченное связывание',score,questions.length,{answers,pairs:state.pairs,confidence:getConfidence('delayed')});
+        task12ErrorMonitoring();return;
+      }
+      const q=questions[idx];
+      const opts=shuffle([q.correct,...shuffle(shapeNames.filter(x=>x!==q.correct)).slice(0,3)]);
+      renderShell(11, `
+        <div class="stage-kicker">Отсроченная память</div>
+        <h2>Какая фигура соответствовала коду?</h2>
+        <div class="center" style="font-size:54px;font-weight:900;color:var(--accent);margin:34px 0">${q.code}</div>
+        <div class="choice-grid">${opts.map(o=>`<button class="choice" data-v="${o}">${shapeSymbols[shapeNames.indexOf(o)]} ${o}</button>`).join('')}</div>
+        ${idx===questions.length-1?confidenceBlock('delayed'):''}
+        <div class="row" style="margin-top:18px"><button class="btn" id="submitRecall" disabled>Ответить</button></div>`);
+      if(idx===questions.length-1)wireConfidence('delayed');
+      let sel=null;
+      document.querySelectorAll('.choice').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');sel=b.dataset.v;document.getElementById('submitRecall').disabled=false;}));
+      document.getElementById('submitRecall').addEventListener('click',()=>{answers.push({code:q.code,answer:sel,correctName:q.correct,correct:sel===q.correct});idx++;renderQuestion();});
+    };
+    renderQuestion();
+  }
+
+  function task12ErrorMonitoring() {
+    // This is folded into the final stage but recorded as task 11's continuation to keep 11 numbered tasks.
+    state.taskStartedAt = performance.now();
+    renderShell(11, `
+      <div class="stage-kicker">Контроль ошибки</div>
+      <h2>Найдите ошибку в решении</h2>
+      <div class="logic-box">
+        Расстояние: 240 км.<br>
+        Скорость: 80 км/ч.<br>
+        Время отправления: 13:20.<br><br>
+        1) Время в пути: 240 ÷ 80 = 3 часа.<br>
+        2) Время прибытия: 13:20 + 3 часа = 15:20.<br>
+        3) Следовательно, прибытие ожидается в 15:20.
+      </div>
+      <div class="choice-grid">
+        <button class="choice" data-v="division">Неверно вычислено время в пути</button>
+        <button class="choice" data-v="addition">Неверно вычислено время прибытия</button>
+        <button class="choice" data-v="units">Нельзя делить километры на км/ч</button>
+        <button class="choice" data-v="none">Ошибок нет</button>
+      </div>
+      ${confidenceBlock('monitoring')}
+      <div class="row" style="
