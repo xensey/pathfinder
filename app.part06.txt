@@ -1,0 +1,120 @@
+margin-top:18px"><button class="btn" id="submitMonitoring" disabled>Ответить</button></div>`);
+    wireConfidence('monitoring');
+    let sel=null;
+    document.querySelectorAll('.choice').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');sel=b.dataset.v;document.getElementById('submitMonitoring').disabled=false;}));
+    document.getElementById('submitMonitoring').addEventListener('click',()=>{
+      addResult('monitoring','Контроль ошибки',sel==='addition'?2:0,2,{answer:sel,correct:'addition',confidence:getConfidence('monitoring')});
+      prospectiveScreen();
+    });
+  }
+
+  function prospectiveScreen() {
+    state.taskStartedAt=performance.now();
+    renderShell(11, `
+      <button class="prospective-target" id="prospectiveTarget" aria-label="символ ромб">◆</button>
+      <div class="center" style="padding:35px 0 15px">
+        <div class="stage-kicker">Финальный переход</div>
+        <h1>Этап завершён</h1>
+        <p class="lead" style="margin-left:auto;margin-right:auto">Перед формированием отчёта можно сделать короткую паузу.</p>
+        <button class="btn" id="continueResults">Показать результаты</button>
+      </div>`);
+    document.getElementById('prospectiveTarget').addEventListener('click',()=>{
+      state.prospective.clickedBeforeContinue=true;
+      state.prospective.clickedAt=new Date().toISOString();
+      const b=document.getElementById('prospectiveTarget'); b.textContent='✓'; b.disabled=true;
+    });
+    document.getElementById('continueResults').addEventListener('click',()=>{
+      addResult('prospective','Проспективная память',state.prospective.clickedBeforeContinue?2:0,2,{...state.prospective});
+      renderResults();
+    });
+  }
+
+  function computeDomains() {
+    const byId=Object.fromEntries(state.results.map(r=>[r.id,r]));
+    const pct=(ids)=>{
+      const rs=ids.map(id=>byId[id]).filter(Boolean); const s=rs.reduce((a,r)=>a+r.score,0), m=rs.reduce((a,r)=>a+r.max,0); return m?Math.round(s/m*100):0;
+    };
+    const calibrationEntries=state.results.filter(r=>r.details&&typeof r.details.confidence==='number');
+    const cal = calibrationEntries.length ? Math.round(100-calibrationEntries.reduce((a,r)=>a+Math.abs(r.details.confidence-(r.score/r.max*100)),0)/calibrationEntries.length) : 0;
+    return [
+      {name:'Рабочая и отсроченная память',value:pct(['reverse','delayed','prospective'])},
+      {name:'Связывание и отношения',value:pct(['relations','matrix','logic'])},
+      {name:'Индукция и гипотезы',value:pct(['number','hypothesis'])},
+      {name:'Переключение правила',value:pct(['switch'])},
+      {name:'Поиск информации и планирование',value:pct(['info','planning'])},
+      {name:'Контроль ошибок',value:pct(['monitoring'])},
+      {name:'Калибровка уверенности',value:Math.max(0,Math.min(100,cal))}
+    ];
+  }
+
+  function interpretation(domains) {
+    const texts=[];
+    const low=domains.filter(d=>d.value<50 && d.name!=='Калибровка уверенности');
+    const strong=domains.filter(d=>d.value>=80 && d.name!=='Калибровка уверенности');
+    if(strong.length) texts.push(`Наиболее устойчивые результаты в этой сессии: ${strong.map(x=>x.name.toLowerCase()).join(', ')}.`);
+    if(low.length) texts.push(`Зоны с наибольшим числом ошибок в этой сессии: ${low.map(x=>x.name.toLowerCase()).join(', ')}.`);
+    const cal=domains.find(d=>d.name==='Калибровка уверенности')?.value ?? 0;
+    if(cal<55) texts.push('Уверенность заметно расходилась с фактической точностью; полезно отдельно смотреть случаи высокой уверенности при ошибочном ответе.');
+    const info=state.results.find(r=>r.id==='info');
+    if(info && info.details.essentialN<3) texts.push('В задаче с ограниченным числом запросов были выбраны не все критически необходимые параметры.');
+    const hyp=state.results.find(r=>r.id==='hypothesis');
+    if(hyp && !hyp.details.hasNegativeProbe) texts.push('При проверке скрытого правила почти не использовались опровергающие примеры — возможна склонность подтверждать первую гипотезу.');
+    const sw=state.results.find(r=>r.id==='switch');
+    if(sw && sw.details.postSwitchErrors>=2) texts.push('После смены правила возникли повторные ошибки в первых пробах; это может отражать инерцию предыдущей установки в рамках данного задания.');
+    if(!texts.length) texts.push('Профиль без выраженного локального провала; для интерпретации важны повторная параллельная версия и сравнение с контрольной группой в одинаковых условиях.');
+    return texts;
+  }
+
+  async function renderResults() {
+    state.finishedAt=new Date().toISOString();
+    await stopCameraRecording();
+    const total=state.results.reduce((a,r)=>a+r.score,0);
+    const max=state.results.reduce((a,r)=>a+r.max,0);
+    const pct=Math.round(total/max*100);
+    const totalTime=Math.round((new Date(state.finishedAt)-new Date(state.startedAt))/1000);
+    const hiddenTime=Math.round(currentHiddenMs()/1000);
+    const activeTime=Math.max(0,totalTime-hiddenTime);
+    const cameraSize=state.camera.blob?.size || 0;
+    const domains=computeDomains();
+    const interp=interpretation(domains);
+    renderShell(TASK_COUNT, `
+      <div class="stage-kicker">Отчёт</div>
+      <h1>Результаты сессии</h1>
+      <div class="result-grid">
+        <div class="metric"><div class="muted">Код участника</div><div class="value" style="font-size:24px">${esc(state.participant)}</div></div>
+        <div class="metric"><div class="muted">Суммарный результат</div><div class="value">${total} / ${max}</div><div class="muted">${pct}% заданий этой батареи</div></div>
+        <div class="metric"><div class="muted">Общее время</div><div class="value">${formatDuration(totalTime)}</div><div class="muted">активно ${formatDuration(activeTime)} · вне вкладки ${formatDuration(hiddenTime)}</div></div>
+        <div class="metric"><div class="muted">Открытия приложения</div><div class="value">${state.openCount}</div><div class="muted">в этом браузере</div></div>
+        <div class="metric"><div class="muted">Видеозапись</div><div class="value" style="font-size:22px">${state.camera.blob ? 'готова' : 'нет'}</div><div class="muted">${state.camera.blob ? `${(cameraSize/1024/1024).toFixed(1)} МБ · без звука` : esc(cameraStatusCopy())}</div></div>
+        <div class="metric"><div class="muted">Версия / идентификатор</div><div class="value" style="font-size:18px">v${VERSION}</div><div class="muted">${esc(state.sessionId)}</div></div>
+      </div>
+
+      <h3>Профиль по доменам</h3>
+      ${domains.map(d=>`<div class="domain"><strong>${d.name}</strong><div class="bar"><div style="width:${d.value}%"></div></div><span>${d.value}%</span></div>`).join('')}
+
+      <div class="note warning" style="margin-top:22px">
+        <strong>Ограничение интерпретации:</strong> проценты не являются IQ, клиническими нормами или диагнозом. На результат влияют сон, тревога, мотивация, зрение, язык, устройство и знакомство с форматами задач. Для устойчивого вывода нужна параллельная повторная версия и сравнение с людьми сходного возраста и образования в тех же условиях.
+      </div>
+
+      <h3>Автоматические наблюдения</h3>
+      <div class="col">${interp.map(t=>`<div class="note">${esc(t)}</div>`).join('')}</div>
+
+      <details open>
+        <summary>Подробности по заданиям</summary>
+        <div style="overflow:auto;margin-top:12px"><table><thead><tr><th>Задание</th><th>Баллы</th><th>Время</th><th>Уверенность</th><th>Статус</th></tr></thead><tbody>
+          ${state.results.map(r=>{
+            const rp=Math.round(r.score/r.max*100); const conf=typeof r.details?.confidence==='number'?`${r.details.confidence}%`:'—'; const cls=rp>=80?'good':rp>=50?'warn':'bad'; const label=rp>=80?'высокая точность':rp>=50?'частично':'много ошибок';
+            return `<tr><td>${esc(r.name)}</td><td>${r.score} / ${r.max}</td><td>${r.timeSec} с</td><td>${conf}</td><td><span class="tag ${cls}">${label}</span></td></tr>`;
+          }).join('')}
+        </tbody></table></div>
+      </details>
+
+      <details>
+        <summary>Технические данные и ответы</summary>
+        <pre style="white-space:pre-wrap;background:#f6f7fa;padding:14px;border-radius:12px;overflow:auto">${esc(JSON.stringify(buildReport(),null,2))}</pre>
+      </details>
+
+      <div class="footer-actions">
+        <button class="btn" id="downloadJson">Скачать JSON</button>
+        <button class="btn secondary" id="downloadCsv">Скачать CSV</button>
+        ${state.camera.blob ? '<button class="btn secondary" id="downloa
