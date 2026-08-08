@@ -1,0 +1,132 @@
+следует</button>
+          <button class="choice" data-v="impossible">Невозможно</button>
+        </div>
+      </div>
+      ${confidenceBlock('logic')}
+      <div class="row" style="margin-top:18px"><button class="btn" id="submitLogic" disabled>Ответить</button></div>`);
+    wireConfidence('logic');
+    const ans={};
+    document.querySelectorAll('[data-q]').forEach(group=>group.querySelectorAll('.choice').forEach(b=>b.addEventListener('click',()=>{
+      group.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');ans[group.dataset.q]=b.dataset.v;
+      document.getElementById('submitLogic').disabled = !(ans.q1&&ans.q2);
+    })));
+    document.getElementById('submitLogic').addEventListener('click',()=>{
+      let score=0; if(ans.q1==='must')score+=2; if(ans.q2==='may')score+=2;
+      addResult('logic','Формальная логика',score,4,{answer:ans,correct:{q1:'must',q2:'may'},confidence:getConfidence('logic')});
+      task7Switch();
+    });
+  }
+
+  function task7Switch() {
+    startTask(7);
+    renderShell(7, `
+      <div class="stage-kicker">Когнитивная гибкость</div>
+      <h2>Классификация с изменением правила</h2>
+      <p class="task-instruction">Будет 16 коротких проб. Первые 8 — классификация по форме, затем правило изменится на классификацию по цвету. Текущее правило будет показано над стимулом.</p>
+      <div class="note">Старайтесь отвечать быстро, но без угадывания.</div>
+      <div class="row" style="margin-top:20px"><button class="btn" id="beginSwitch">Начать</button></div>`);
+    document.getElementById('beginSwitch').addEventListener('click', run);
+
+    function run() {
+      const trials=[];
+      for(let i=0;i<16;i++){
+        const phase=i<8?'shape':'color';
+        const shape=Math.random()<.5?'circle':'triangle';
+        const color=Math.random()<.5?'blue':'orange';
+        const correct = phase==='shape' ? (shape==='circle'?'left':'right') : (color==='blue'?'left':'right');
+        trials.push({phase,shape,color,correct});
+      }
+      let i=0; state.switchLog=[];
+      const renderTrial=()=>{
+        if(i>=trials.length){
+          const correctN=state.switchLog.filter(x=>x.correct).length;
+          const postSwitchErrors=state.switchLog.slice(8,12).filter(x=>!x.correct).length;
+          addResult('switch','Переключение правила',correctN,16,{trials:state.switchLog,postSwitchErrors});
+          task8Information(); return;
+        }
+        const t=trials[i];
+        const phaseTitle=t.phase==='shape'?'Правило: КРУГ → левая кнопка, ТРЕУГОЛЬНИК → правая':'Новое правило: СИНИЙ → левая кнопка, ОРАНЖЕВЫЙ → правая';
+        renderShell(7, `
+          <div class="stage-kicker">Когнитивная гибкость</div>
+          <div class="mini-progress"><div style="width:${(i/16)*100}%"></div></div>
+          <h2 class="center" style="margin-top:18px">${phaseTitle}</h2>
+          ${i===8?'<div class="note warning center"><strong>Правило изменилось</strong></div>':''}
+          <div class="stimulus"><div class="shape ${t.shape} ${t.color}"></div></div>
+          <div class="response-row"><button class="btn response-btn" id="leftBtn">Левая</button><button class="btn response-btn" id="rightBtn">Правая</button></div>`);
+        const shownAt=performance.now();
+        const respond=(choice)=>{
+          const rt=msToSec(performance.now()-shownAt);
+          state.switchLog.push({trial:i+1,phase:t.phase,shape:t.shape,color:t.color,choice,correct:choice===t.correct,rtSec:rt});
+          i++; setTimeout(renderTrial,120);
+        };
+        document.getElementById('leftBtn').addEventListener('click',()=>respond('left'));
+        document.getElementById('rightBtn').addEventListener('click',()=>respond('right'));
+      };
+      renderTrial();
+    }
+  }
+
+  function task8Information() {
+    startTask(8);
+    const cards = shuffle([
+      {id:'distance', label:'Расстояние до станции', value:'1 800 м', essential:true},
+      {id:'speed', label:'Скорость дрона', value:'12 м/с', essential:true},
+      {id:'battery', label:'Оставшееся время полёта', value:'130 с', essential:true},
+      {id:'mass', label:'Масса дрона', value:'2,4 кг', essential:false},
+      {id:'camera', label:'Разрешение камеры', value:'4K', essential:false},
+      {id:'color', label:'Цвет корпуса', value:'серый', essential:false}
+    ]);
+    let selected=[];
+    renderShell(8, `
+      <div class="stage-kicker">Работа с неполной информацией</div>
+      <h2>Сможет ли дрон долететь?</h2>
+      <p class="task-instruction">Нужно определить, долетит ли исследовательский дрон до зарядной станции до исчерпания батареи. Разрешено открыть <strong>не более трёх</strong> карточек. Выберите наиболее полезные данные.</p>
+      <div class="row" style="justify-content:space-between;margin-bottom:12px"><span class="muted">Открыто карточек</span><strong id="infoCount">0 / 3</strong></div>
+      <div class="info-grid">${cards.map(c=>`<button class="info-card" data-id="${c.id}" data-essential="${c.essential}"><strong>${c.label}</strong><span class="muted">Нажмите, чтобы открыть</span></button>`).join('')}</div>
+      <div id="infoAnswer" class="hidden" style="margin-top:24px">
+        <div class="question-block"><strong>Ваш вывод</strong><div class="choice-grid" style="margin-top:10px"><button class="choice" data-flight="yes">Да, долетит</button><button class="choice" data-flight="no">Нет, не долетит</button><button class="choice" data-flight="unknown">Недостаточно данных</button></div></div>
+        <div class="field" style="margin-top:14px"><label for="margin">На сколько секунд дрон опоздает или прибудет раньше? Укажите число без знака; если данных недостаточно — оставьте пустым.</label><input id="margin" type="number" step="1" placeholder="Например: 20" /></div>
+        ${confidenceBlock('info')}
+        <div class="row" style="margin-top:18px"><button class="btn" id="submitInfo" disabled>Ответить</button></div>
+      </div>`);
+    let flight=null;
+    document.querySelectorAll('.info-card').forEach(b=>b.addEventListener('click',()=>{
+      if(b.classList.contains('revealed')||selected.length>=3)return;
+      const card=cards.find(c=>c.id===b.dataset.id); selected.push(card);
+      b.classList.add('revealed'); b.innerHTML=`<strong>${card.label}</strong><span class="value">${card.value}</span>`;
+      document.getElementById('infoCount').textContent=`${selected.length} / 3`;
+      if(selected.length===3){
+        document.querySelectorAll('.info-card:not(.revealed)').forEach(x=>x.disabled=true);
+        document.getElementById('infoAnswer').classList.remove('hidden');
+        wireConfidence('info');
+        document.querySelectorAll('[data-flight]').forEach(x=>x.addEventListener('click',()=>{document.querySelectorAll('[data-flight]').forEach(y=>y.classList.remove('selected'));x.classList.add('selected');flight=x.dataset.flight;document.getElementById('submitInfo').disabled=false;}));
+        document.getElementById('submitInfo').addEventListener('click',()=>{
+          const essentialN=selected.filter(x=>x.essential).length;
+          const marginRaw=document.getElementById('margin').value.trim();
+          const margin=marginRaw===''?null:Number(marginRaw);
+          let score=essentialN; // 0..3 за выбор данных
+          if((essentialN===3 && flight==='no') || (essentialN<3 && flight==='unknown')) score+=1;
+          if(essentialN===3 && Number.isFinite(margin) && Math.abs(margin-20)<.001) score+=1;
+          state.infoSelections=selected.map(x=>x.id);
+          addResult('info','Поиск недостающей информации',score,5,{selected:selected.map(x=>x.id),essentialN,flight,margin,correct:{flight:'no',margin:20},confidence:getConfidence('info')});
+          task9Hypothesis();
+        });
+      }
+    }));
+  }
+
+  function task9Hypothesis() {
+    startTask(9);
+    state.hypothesisProbes=[];
+    const maxProbes=5;
+    renderShell(9, `
+      <div class="stage-kicker">Проверка гипотез</div>
+      <h2>Найдите скрытое правило</h2>
+      <p class="task-instruction">Тройка <strong>4–7–10</strong> подходит правилу. Предложите до пяти своих троек. После каждой система ответит только «подходит» или «не подходит». Затем выберите правило.</p>
+      <div class="row">
+        <input id="p1" type="number" style="width:110px" placeholder="1" />
+        <input id="p2" type="number" style="width:110px" placeholder="2" />
+        <input id="p3" type="number" style="width:110px" placeholder="3" />
+        <button class="btn" id="checkProbe">Проверить</button>
+      </div>
+      <div class="mu
