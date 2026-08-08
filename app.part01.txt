@@ -1,0 +1,211 @@
+(() => {
+  'use strict';
+
+  const VERSION = '1.1';
+  const TASK_COUNT = 11;
+  const app = document.getElementById('app');
+  const symbolPool = ['●','▲','■','◆','★','⬟','✚','⬢'];
+  const shapeNames = ['круг','треугольник','квадрат','ромб','звезда','шестиугольник'];
+  const shapeSymbols = ['●','▲','■','◆','★','⬢'];
+  const codePool = ['K7','M2','R5','T9','B4','P8','L3','V6'];
+  const OPEN_COUNT_KEY = 'neurobureau_online_open_count_v1';
+  const FIRST_OPEN_KEY = 'neurobureau_online_first_open_v1';
+  const LAST_OPEN_KEY = 'neurobureau_online_last_open_v1';
+  const openedAt = new Date().toISOString();
+  const sessionId = (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
+    ? globalThis.crypto.randomUUID()
+    : `nb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let openCount = 1;
+  let firstOpenedAt = openedAt;
+  try {
+    const previous = Number.parseInt(localStorage.getItem(OPEN_COUNT_KEY) || '0', 10);
+    openCount = Number.isFinite(previous) ? previous + 1 : 1;
+    localStorage.setItem(OPEN_COUNT_KEY, String(openCount));
+    firstOpenedAt = localStorage.getItem(FIRST_OPEN_KEY) || openedAt;
+    if (!localStorage.getItem(FIRST_OPEN_KEY)) localStorage.setItem(FIRST_OPEN_KEY, openedAt);
+    localStorage.setItem(LAST_OPEN_KEY, openedAt);
+  } catch (_) {
+    openCount = 1;
+    firstOpenedAt = openedAt;
+  }
+
+  const state = {
+    participant: '',
+    seed: Math.floor(Math.random()*1e9),
+    sessionId,
+    openedAt,
+    firstOpenedAt,
+    openCount,
+    startedAt: null,
+    finishedAt: null,
+    startPerf: null,
+    current: 0,
+    taskStartedAt: null,
+    results: [],
+    confidences: [],
+    pairs: [],
+    sequence: [],
+    prospective: {
+      instructionSeen: false,
+      clickedBeforeContinue: false,
+      clickedAt: null,
+      target: '◆'
+    },
+    switchLog: [],
+    infoSelections: [],
+    hypothesisProbes: [],
+    hiddenMs: 0,
+    hiddenStartedPerf: null,
+    focusLossCount: 0,
+    visibilityLog: [],
+    camera: {
+      consent: false,
+      status: 'not_requested',
+      stream: null,
+      recorder: null,
+      chunks: [],
+      blob: null,
+      mimeType: '',
+      startedAt: null,
+      stoppedAt: null,
+      error: null
+    }
+  };
+
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i=a.length-1;i>0;i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [a[i],a[j]]=[a[j],a[i]];
+    }
+    return a;
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  }
+
+  function msToSec(ms) { return Math.round(ms/100)/10; }
+  function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(totalSeconds || 0));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+  }
+  function currentWallMs() { return state.startPerf === null ? 0 : Math.max(0, performance.now() - state.startPerf); }
+  function currentHiddenMs() {
+    const liveHidden = state.hiddenStartedPerf === null ? 0 : Math.max(0, performance.now() - state.hiddenStartedPerf);
+    return state.hiddenMs + liveHidden;
+  }
+  function currentActiveMs() { return Math.max(0, currentWallMs() - currentHiddenMs()); }
+  function updateLiveTimer() {
+    const el = document.getElementById('sessionTimer');
+    if (el) el.textContent = `⏱ ${formatDuration(currentWallMs()/1000)}`;
+  }
+  setInterval(updateLiveTimer, 500);
+
+  function startTask(index) {
+    state.current = index;
+    state.taskStartedAt = performance.now();
+    renderShell(index);
+  }
+
+  function addResult(id, name, score, max, details={}) {
+    const existing = state.results.findIndex(r => r.id === id);
+    const entry = {
+      id, name, score, max,
+      timeSec: msToSec(performance.now() - state.taskStartedAt),
+      details
+    };
+    if (existing >= 0) state.results[existing] = entry;
+    else state.results.push(entry);
+  }
+
+  function setConfidence(taskId, value) {
+    const idx = state.confidences.findIndex(x => x.taskId === taskId);
+    const v = Number(value);
+    if (idx >= 0) state.confidences[idx].value = v;
+    else state.confidences.push({taskId, value: v});
+  }
+
+  function getConfidence(taskId) {
+    return state.confidences.find(x => x.taskId === taskId)?.value ?? 50;
+  }
+
+  function renderShell(index, bodyHtml='') {
+    const pct = index <= 0 ? 0 : Math.min(100, Math.round(index/TASK_COUNT*100));
+    const recording = state.camera.status === 'recording' ? '<span class="recording-badge">запись</span>' : '';
+    app.innerHTML = `
+      <div class="shell">
+        <div class="topbar">
+          <div><div class="brand">Нейробюро онлайн</div><div class="version">интерактивная когнитивная мини-батарея v${VERSION} · открытие №${state.openCount}</div></div>
+          ${index > 0 ? `<div class="session-meta"><div class="progress-wrap"><div class="progress-label"><span>Задание ${Math.min(index,TASK_COUNT)} из ${TASK_COUNT}</span><span>${pct}%</span></div><div class="progress"><div style="width:${pct}%"></div></div></div><div class="row" style="justify-content:flex-end">${recording}<div class="timer-pill" id="sessionTimer">⏱ ${formatDuration(currentWallMs()/1000)}</div></div></div>` : ''}
+        </div>
+        <main class="card">${bodyHtml}</main>
+      </div>`;
+  }
+
+  function confidenceBlock(taskId) {
+    const v = getConfidence(taskId);
+    return `
+      <div class="confidence">
+        <div class="row" style="justify-content:space-between"><strong>Уверенность в ответе</strong><span class="conf-value" id="confVal">${v}%</span></div>
+        <input id="confidence" type="range" min="0" max="100" step="5" value="${v}" />
+      </div>`;
+  }
+
+  function wireConfidence(taskId) {
+    const input = document.getElementById('confidence');
+    const out = document.getElementById('confVal');
+    if (!input) return;
+    input.addEventListener('input', () => { out.textContent = `${input.value}%`; setConfidence(taskId, input.value); });
+    setConfidence(taskId, input.value);
+  }
+
+  function cameraStatusCopy() {
+    const status = state.camera.status;
+    if (status === 'requesting') return 'Ожидается разрешение браузера…';
+    if (status === 'ready') return 'Камера подключена. Запись начнётся вместе с тестом.';
+    if (status === 'recording') return 'Идёт видеозапись.';
+    if (status === 'denied') return 'Доступ к камере отклонён.';
+    if (status === 'unsupported') return 'Этот браузер не поддерживает запись камеры.';
+    if (status === 'error') return 'Камеру не удалось подключить.';
+    if (status === 'skipped') return 'Тест запущен без видеозаписи.';
+    return 'Камера ещё не подключена.';
+  }
+
+  function updateCameraUI() {
+    const statusText = document.getElementById('cameraStatusText');
+    const dot = document.getElementById('cameraStatusDot');
+    const startBtn = document.getElementById('startBtn');
+    const cameraBtn = document.getElementById('cameraBtn');
+    const placeholder = document.getElementById('cameraPlaceholder');
+    if (statusText) statusText.textContent = cameraStatusCopy();
+    if (dot) dot.className = `status-dot ${state.camera.status}`;
+    if (startBtn) startBtn.disabled = state.camera.status !== 'ready';
+    if (cameraBtn) cameraBtn.textContent = state.camera.status === 'ready' ? 'Камера подключена' : 'Подключить камеру';
+    if (cameraBtn) cameraBtn.disabled = ['requesting','ready','recording'].includes(state.camera.status);
+    if (placeholder) placeholder.classList.toggle('hidden', ['ready','recording'].includes(state.camera.status));
+  }
+
+  async function initCamera() {
+    const consent = document.getElementById('cameraConsent');
+    const errorBox = document.getElementById('cameraError');
+    if (!consent?.checked) {
+      if (errorBox) { errorBox.textContent = 'Сначала подтвердите информированное согласие на видеозапись.'; errorBox.classList.remove('hidden'); }
+      return;
+    }
+    state.camera.consent = true;
+    if (errorBox) errorBox.classList.add('hidden');
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      state.camera.status = 'unsupported';
+      state.camera.error = 'getUserMedia or MediaRecorder unavailable';
+      updateCameraUI();
+      return;
+    }
+    state.camera.status = 'requesting';
+    updateCameraUI();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { fa
