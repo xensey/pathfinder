@@ -1,0 +1,68 @@
+dVideo">Скачать видео</button>' : ''}
+        <button class="btn secondary" id="printReport">Печать / PDF</button>
+        <button class="btn ghost" id="restart">Новая сессия</button>
+      </div>`);
+    document.getElementById('downloadJson').addEventListener('click',()=>downloadFile(`cognitive_screen_${safeName(state.participant)}_${dateStamp()}.json`,JSON.stringify(buildReport(),null,2),'application/json'));
+    document.getElementById('downloadCsv').addEventListener('click',()=>downloadFile(`cognitive_screen_${safeName(state.participant)}_${dateStamp()}.csv`,makeCsv(),'text/csv;charset=utf-8'));
+    document.getElementById('downloadVideo')?.addEventListener('click',()=>{ const ext=(state.camera.blob.type||'').includes('mp4')?'mp4':'webm'; downloadBlob(`neurobureau_${safeName(state.participant)}_${dateStamp()}.${ext}`,state.camera.blob); });
+    document.getElementById('printReport').addEventListener('click',()=>window.print());
+    document.getElementById('restart').addEventListener('click',()=>location.reload());
+  }
+
+  function buildReport() {
+    const wallTimeSec = state.startedAt && state.finishedAt ? Math.round((new Date(state.finishedAt)-new Date(state.startedAt))/1000) : Math.round(currentWallMs()/1000);
+    const hiddenTimeSec = Math.round(currentHiddenMs()/1000);
+    return {
+      meta:{
+        app:'Нейробюро онлайн',version:VERSION,participant:state.participant,seed:state.seed,sessionId:state.sessionId,
+        openedAt:state.openedAt,firstOpenedAt:state.firstOpenedAt,openCount:state.openCount,startedAt:state.startedAt,finishedAt:state.finishedAt,
+        userAgent:navigator.userAgent,language:navigator.language,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+        viewport:{width:window.innerWidth,height:window.innerHeight},screen:{width:screen.width,height:screen.height,pixelRatio:window.devicePixelRatio}
+      },
+      timing:{wallTimeSec,activeTimeSec:Math.max(0,wallTimeSec-hiddenTimeSec),hiddenTimeSec,focusLossCount:state.focusLossCount,visibilityLog:state.visibilityLog},
+      camera:{
+        consent:state.camera.consent,status:state.camera.status,mimeType:state.camera.blob?.type || state.camera.mimeType,
+        startedAt:state.camera.startedAt,stoppedAt:state.camera.stoppedAt,sizeBytes:state.camera.blob?.size || 0,
+        available:Boolean(state.camera.blob),audioRecorded:false,error:state.camera.error
+      },
+      totals:{score:state.results.reduce((a,r)=>a+r.score,0),max:state.results.reduce((a,r)=>a+r.max,0)},
+      domains:computeDomains(),
+      results:state.results,
+      confidences:state.confidences,
+      notes:'Авторская нейтральная мини-батарея; не является IQ-тестом или клинической диагностикой.'
+    };
+  }
+
+  function safeName(s){return String(s||'participant').replace(/[^a-zA-Zа-яА-Я0-9_-]+/g,'_').slice(0,40);}
+  function dateStamp(){return new Date().toISOString().replace(/[:.]/g,'-');}
+  function downloadFile(name,content,type){const blob=new Blob(['\uFEFF',content],{type});downloadBlob(name,blob);}
+  function downloadBlob(name,blob){if(!blob)return;const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);}
+  function csvCell(v){const s=typeof v==='string'?v:JSON.stringify(v);return `"${String(s??'').replace(/"/g,'""')}"`;}
+  function makeCsv(){
+    const rows=[['participant','session_id','open_count','camera_status','task_id','task_name','score','max','time_sec','confidence','details']];
+    state.results.forEach(r=>rows.push([state.participant,state.sessionId,state.openCount,state.camera.status,r.id,r.name,r.score,r.max,r.timeSec,r.details?.confidence??'',r.details]));
+    return rows.map(row=>row.map(csvCell).join(';')).join('\n');
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    const nowPerf = performance.now();
+    state.visibilityLog.push({at:new Date().toISOString(),visibility:document.visibilityState,task:state.current});
+    if (!state.startedAt || state.finishedAt) return;
+    if (document.hidden) {
+      state.focusLossCount += 1;
+      if (state.hiddenStartedPerf === null) state.hiddenStartedPerf = nowPerf;
+    } else if (state.hiddenStartedPerf !== null) {
+      state.hiddenMs += Math.max(0, nowPerf - state.hiddenStartedPerf);
+      state.hiddenStartedPerf = null;
+    }
+  });
+
+  window.addEventListener('beforeunload', event => {
+    if (state.camera.recorder?.state === 'recording' && !state.finishedAt) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+
+  renderStart();
+})();
