@@ -1,0 +1,152 @@
+s="center"><button class="btn" id="showSeq">Показать последовательность</button></div>`);
+    document.getElementById('showSeq').addEventListener('click', () => {
+      renderShell(2, `<div class="stage-kicker">Рабочая память</div><h2 class="center">Смотрите на центр экрана</h2><div class="stimulus"><div id="seqSymbol" class="sequence-symbol"></div></div>`);
+      const el = document.getElementById('seqSymbol');
+      const showNext = () => {
+        if (idx >= state.sequence.length) { setTimeout(renderReverseInput, 550); return; }
+        el.textContent = state.sequence[idx];
+        idx++;
+        setTimeout(()=>{ el.textContent=''; setTimeout(showNext,230); }, 720);
+      };
+      showNext();
+    });
+
+    function renderReverseInput() {
+      let answer = [];
+      renderShell(2, `
+        <div class="stage-kicker">Рабочая память</div>
+        <h2>Введите последовательность в обратном порядке</h2>
+        <div class="answer-strip" id="answerStrip"><span class="muted">Выбранные символы появятся здесь</span></div>
+        <div class="symbol-grid">${state.sequence.map(s=>`<button class="symbol-btn" data-s="${s}">${s}</button>`).join('')}</div>
+        <div class="row" style="margin-top:18px"><button class="btn secondary" id="undo">Отменить последний</button><button class="btn" id="submit" disabled>Ответить</button></div>`);
+      const strip = document.getElementById('answerStrip');
+      function redraw() {
+        strip.innerHTML = answer.length ? answer.map(s=>`<span class="answer-chip">${s}</span>`).join('') : '<span class="muted">Выбранные символы появятся здесь</span>';
+        document.getElementById('submit').disabled = answer.length !== state.sequence.length;
+      }
+      document.querySelectorAll('.symbol-btn').forEach(btn => btn.addEventListener('click', ()=>{
+        if (answer.length < state.sequence.length) { answer.push(btn.dataset.s); redraw(); }
+      }));
+      document.getElementById('undo').addEventListener('click', ()=>{ answer.pop(); redraw(); });
+      document.getElementById('submit').addEventListener('click', ()=>{
+        const correct = [...state.sequence].reverse();
+        const correctPositions = answer.filter((x,i)=>x===correct[i]).length;
+        addResult('reverse','Обратная последовательность',correctPositions,6,{sequence:state.sequence,answer,correct});
+        task3Relations();
+      });
+    }
+  }
+
+  function task3Relations() {
+    startTask(3);
+    const correct = ['Лира','Нора','Мира','Тера'];
+    const items = shuffle(correct);
+    let selected = [];
+    renderShell(3, `
+      <div class="stage-kicker">Интеграция отношений</div>
+      <h2>Расположите объекты слева направо</h2>
+      <div class="logic-box">
+        Лира находится левее Норы.<br>
+        Тера находится правее Норы.<br>
+        Мира находится между Норой и Терой.
+      </div>
+      <div class="answer-strip" id="orderStrip"><span class="muted">Нажимайте элементы в нужном порядке</span></div>
+      <div class="token-grid">${items.map(x=>`<button class="token" data-x="${x}">${x}</button>`).join('')}</div>
+      <div class="row" style="margin-top:18px"><button class="btn secondary" id="resetOrder">Сбросить</button><button class="btn" id="submitOrder" disabled>Ответить</button></div>
+      ${confidenceBlock('relations')}`);
+    wireConfidence('relations');
+    function redraw() {
+      document.getElementById('orderStrip').innerHTML = selected.length ? selected.map((x,i)=>`<span class="answer-chip" style="font-size:16px">${i+1}. ${x}</span>`).join('') : '<span class="muted">Нажимайте элементы в нужном порядке</span>';
+      document.querySelectorAll('.token').forEach(b=>b.classList.toggle('used',selected.includes(b.dataset.x)));
+      document.getElementById('submitOrder').disabled = selected.length!==4;
+    }
+    document.querySelectorAll('.token').forEach(b=>b.addEventListener('click',()=>{ if(!selected.includes(b.dataset.x)){selected.push(b.dataset.x);redraw();} }));
+    document.getElementById('resetOrder').addEventListener('click',()=>{selected=[];redraw();});
+    document.getElementById('submitOrder').addEventListener('click',()=>{
+      const score = selected.filter((x,i)=>x===correct[i]).length;
+      addResult('relations','Пространственные отношения',score,4,{answer:selected,correct,confidence:getConfidence('relations')});
+      task4NumberPattern();
+    });
+  }
+
+  function task4NumberPattern() {
+    startTask(4);
+    const options = [
+      {t:'36 и 47', ok:false},
+      {t:'38 и 51', ok:true},
+      {t:'37 и 49', ok:false},
+      {t:'39 и 54', ok:false}
+    ];
+    renderShell(4, `
+      <div class="stage-kicker">Индукция правила</div>
+      <h2>Продолжите числовой ряд</h2>
+      <div class="center" style="font-size:clamp(28px,5vw,46px);font-weight:850;letter-spacing:.04em;margin:28px 0">3, 6, 11, 18, 27, __, __</div>
+      <div class="choice-grid">${shuffle(options).map(o=>`<button class="choice" data-ok="${o.ok}">${o.t}</button>`).join('')}</div>
+      ${confidenceBlock('number')}
+      <div class="row" style="margin-top:18px"><button class="btn" id="submitNumber" disabled>Ответить</button></div>`);
+    wireConfidence('number');
+    let selected = null;
+    document.querySelectorAll('.choice').forEach(b=>b.addEventListener('click',()=>{
+      document.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));
+      b.classList.add('selected'); selected=b; document.getElementById('submitNumber').disabled=false;
+    }));
+    document.getElementById('submitNumber').addEventListener('click',()=>{
+      const correct = selected.dataset.ok==='true';
+      addResult('number','Числовая закономерность',correct?2:0,2,{answer:selected.textContent,correct:'38 и 51',confidence:getConfidence('number')});
+      task5Matrix();
+    });
+  }
+
+  function task5Matrix() {
+    startTask(5);
+    const options = shuffle([
+      {t:'○△', ok:true},
+      {t:'△★', ok:false},
+      {t:'○★', ok:false},
+      {t:'□△', ok:false}
+    ]);
+    renderShell(5, `
+      <div class="stage-kicker">Абстрактное рассуждение</div>
+      <h2>Выберите недостающую ячейку</h2>
+      <p class="task-instruction">Во всех строках действует одно и то же правило.</p>
+      <div class="matrix">
+        <div class="matrix-cell">○△</div><div class="matrix-cell">△□</div><div class="matrix-cell">○□</div>
+        <div class="matrix-cell">○□</div><div class="matrix-cell">□★</div><div class="matrix-cell">○★</div>
+        <div class="matrix-cell">△★</div><div class="matrix-cell">○★</div><div class="matrix-cell missing">?</div>
+      </div>
+      <div class="choice-grid">${options.map(o=>`<button class="choice center" style="font-size:28px" data-ok="${o.ok}">${o.t}</button>`).join('')}</div>
+      ${confidenceBlock('matrix')}
+      <div class="row" style="margin-top:18px"><button class="btn" id="submitMatrix" disabled>Ответить</button></div>`);
+    wireConfidence('matrix');
+    let selected=null;
+    document.querySelectorAll('.choice').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');selected=b;document.getElementById('submitMatrix').disabled=false;}));
+    document.getElementById('submitMatrix').addEventListener('click',()=>{
+      const ok=selected.dataset.ok==='true';
+      addResult('matrix','Матричное рассуждение',ok?3:0,3,{answer:selected.textContent,correct:'○△',confidence:getConfidence('matrix')});
+      task6Logic();
+    });
+  }
+
+  function task6Logic() {
+    startTask(6);
+    renderShell(6, `
+      <div class="stage-kicker">Формальная логика</div>
+      <h2>Какие выводы следуют обязательно?</h2>
+      <div class="logic-box">
+        Все фалы являются норами.<br>
+        Ни один нор не является тиром.<br>
+        Некоторые мевы являются фалами.
+      </div>
+      <div class="question-block">
+        <strong>1. Некоторые мевы не являются тирами.</strong>
+        <div class="choice-grid" data-q="q1" style="margin-top:10px">
+          <button class="choice" data-v="must">Обязательно верно</button>
+          <button class="choice" data-v="may">Может быть, но не следует</button>
+          <button class="choice" data-v="impossible">Невозможно</button>
+        </div>
+      </div>
+      <div class="question-block">
+        <strong>2. Ни один мев не является тиром.</strong>
+        <div class="choice-grid" data-q="q2" style="margin-top:10px">
+          <button class="choice" data-v="must">Обязательно верно</button>
+          <button class="choice" data-v="may">Может быть, но не 
