@@ -1,0 +1,154 @@
+cingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 20 } },
+        audio: false
+      });
+      state.camera.stream = stream;
+      state.camera.status = 'ready';
+      const preview = document.getElementById('cameraPreview');
+      if (preview) {
+        preview.srcObject = stream;
+        await preview.play().catch(()=>{});
+      }
+    } catch (err) {
+      state.camera.status = err?.name === 'NotAllowedError' ? 'denied' : 'error';
+      state.camera.error = `${err?.name || 'Error'}: ${err?.message || String(err)}`;
+      if (errorBox) { errorBox.textContent = `Камера недоступна: ${err?.message || err}`; errorBox.classList.remove('hidden'); }
+    }
+    updateCameraUI();
+  }
+
+  function chooseVideoMimeType() {
+    const candidates = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4'];
+    return candidates.find(t => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported?.(t)) || '';
+  }
+
+  async function startCameraRecording() {
+    if (!state.camera.stream || state.camera.status !== 'ready') return false;
+    try {
+      state.camera.chunks = [];
+      state.camera.mimeType = chooseVideoMimeType();
+      const options = { videoBitsPerSecond: 350000 };
+      if (state.camera.mimeType) options.mimeType = state.camera.mimeType;
+      const recorder = new MediaRecorder(state.camera.stream, options);
+      state.camera.recorder = recorder;
+      recorder.addEventListener('dataavailable', event => { if (event.data?.size) state.camera.chunks.push(event.data); });
+      recorder.addEventListener('error', event => {
+        state.camera.error = event?.error?.message || 'MediaRecorder error';
+        state.camera.status = 'error';
+      });
+      recorder.start(1000);
+      state.camera.startedAt = new Date().toISOString();
+      state.camera.status = 'recording';
+      return true;
+    } catch (err) {
+      state.camera.error = `${err?.name || 'Error'}: ${err?.message || String(err)}`;
+      state.camera.status = 'error';
+      return false;
+    }
+  }
+
+  async function stopCameraRecording() {
+    const cam = state.camera;
+    if (cam.recorder && cam.recorder.state !== 'inactive') {
+      await new Promise(resolve => {
+        const finish = () => resolve();
+        cam.recorder.addEventListener('stop', finish, { once: true });
+        try { cam.recorder.stop(); } catch (_) { resolve(); }
+        setTimeout(resolve, 2500);
+      });
+    }
+    if (!cam.blob && cam.chunks.length) {
+      cam.blob = new Blob(cam.chunks, { type: cam.mimeType || cam.chunks[0]?.type || 'video/webm' });
+    }
+    cam.stream?.getTracks?.().forEach(track => track.stop());
+    cam.stoppedAt = new Date().toISOString();
+    if (cam.status === 'recording') cam.status = cam.blob ? 'recorded' : 'stopped';
+  }
+
+  function stopCameraPreview() {
+    state.camera.stream?.getTracks?.().forEach(track => track.stop());
+    state.camera.stream = null;
+  }
+
+  async function beginSession(useCamera) {
+    state.participant = document.getElementById('pid').value.trim() || 'без кода';
+    state.startedAt = new Date().toISOString();
+    state.startPerf = performance.now();
+    state.prospective.instructionSeen = true;
+    if (useCamera) await startCameraRecording();
+    else { stopCameraPreview(); state.camera.status = 'skipped'; }
+    task1Encoding();
+  }
+
+  function renderStart() {
+    renderShell(0, `
+      <div class="stage-kicker">Нейробюро онлайн</div>
+      <h1>Интерактивный когнитивный тест</h1>
+      <p class="lead">11 полностью экранных заданий на рабочую память, связывание отношений, индукцию правил, переключение, поиск недостающей информации, планирование и контроль ошибок.</p>
+      <div class="note warning">
+        <strong>Важно:</strong> это авторская мини-батарея, а не стандартизированный IQ‑тест и не медицинская диагностика. Результат описывает выполнение данной сессии и не должен быть единственным основанием для кадровых или медицинских решений.
+      </div>
+      <div class="col" style="margin-top:22px">
+        <div class="field" style="max-width:620px"><label for="pid">Имя или код участника</label><input id="pid" type="text" maxlength="60" placeholder="Например: Алина / A-01" autocomplete="off" /></div>
+        <div class="note">Все инструкции предъявляются на экране; устных ответов и устного предъявления нет. Система запишет общее время, время каждого задания, число открытий приложения и случаи ухода со вкладки.</div>
+        <div class="camera-panel">
+          <div class="camera-preview-wrap">
+            <video id="cameraPreview" class="camera-preview" muted playsinline></video>
+            <div class="camera-placeholder" id="cameraPlaceholder">Предпросмотр камеры появится здесь после разрешения</div>
+          </div>
+          <div class="col">
+            <div class="camera-status"><span class="status-dot" id="cameraStatusDot"></span><span id="cameraStatusText">Камера ещё не подключена.</span></div>
+            <label class="checkbox-row"><input id="cameraConsent" type="checkbox" /><span>Я понимаю, что во время теста будет записано видео с камеры, и даю на это согласие.</span></label>
+            <div class="privacy-copy">Видео записывается без звука и не отправляется на сервер этой статической версии. После завершения его можно скачать отдельным файлом вместе с JSON/CSV‑отчётом.</div>
+            <div class="row"><button class="btn secondary" id="cameraBtn">Подключить камеру</button><button class="btn ghost" id="skipCamera">Начать без видеозаписи</button></div>
+            <div class="note danger hidden" id="cameraError"></div>
+          </div>
+        </div>
+        <div class="note success">
+          <strong>Отложенная инструкция:</strong> когда позже появится точная фраза <em>«Этап завершён»</em>, сначала нажмите символ <strong>◆</strong> в правом верхнем углу и только затем продолжайте.
+        </div>
+        <div class="row"><button class="btn" id="startBtn" disabled>Начать тест с записью</button></div>
+        <div class="privacy-copy">Это открытие приложения №${state.openCount} в данном браузере. Счётчик хранится только локально и может сброситься при очистке данных браузера или использовании другого устройства.</div>
+      </div>`);
+    document.getElementById('cameraBtn').addEventListener('click', initCamera);
+    document.getElementById('cameraConsent').addEventListener('change', () => {
+      state.camera.consent = document.getElementById('cameraConsent').checked;
+      const errorBox = document.getElementById('cameraError');
+      if (errorBox && state.camera.consent) errorBox.classList.add('hidden');
+    });
+    document.getElementById('startBtn').addEventListener('click', () => beginSession(true));
+    document.getElementById('skipCamera').addEventListener('click', () => {
+      const ok = confirm('Продолжить без видеозаписи? В отчёте будет отмечено, что камера не использовалась.');
+      if (ok) beginSession(false);
+    });
+    updateCameraUI();
+  }
+
+  function task1Encoding() {
+    startTask(1);
+    const chosenCodes = shuffle(codePool).slice(0,6);
+    const chosenIdx = shuffle([0,1,2,3,4,5]).slice(0,6);
+    state.pairs = chosenCodes.map((code,i) => ({code, name: shapeNames[chosenIdx[i]], symbol: shapeSymbols[chosenIdx[i]]}));
+    let seconds = 18;
+    renderShell(1, `
+      <div class="stage-kicker">Этап запоминания</div>
+      <h2>Запомните пары</h2>
+      <p class="task-instruction">На следующем этапе эти пары исчезнут. Постарайтесь запомнить не только элементы, но и соответствие между каждым кодом и фигурой.</p>
+      <div class="center"><div class="countdown" id="countdown">${seconds}</div><div class="muted">секунд осталось</div></div>
+      <div class="pair-grid">${state.pairs.map(p=>`<div class="pair-card"><div class="pair-code">${p.code}</div><div class="pair-symbol">${p.symbol}</div><div>${p.name}</div></div>`).join('')}</div>`);
+    const timer = setInterval(() => {
+      seconds--;
+      const el = document.getElementById('countdown');
+      if (el) el.textContent = seconds;
+      if (seconds <= 0) { clearInterval(timer); task2ReverseSequence(); }
+    }, 1000);
+  }
+
+  function task2ReverseSequence() {
+    startTask(2);
+    state.sequence = shuffle(symbolPool).slice(0,6);
+    let idx = 0;
+    renderShell(2, `
+      <div class="stage-kicker">Рабочая память</div>
+      <h2>Последовательность символов</h2>
+      <p class="task-instruction">Сейчас по одному появятся шесть символов. После показа нажмите их <strong>в обратном порядке</strong>.</p>
+      <div clas
