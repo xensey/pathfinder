@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#02050b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="A self-contained, interactive monocular depth illusion for iPhone. Motion parallax, occlusion, kinetic depth and perspective.">
+  <title>DEEPFIELD — a perception experiment</title>
+  <style>
+    :root { color-scheme: dark; --ink:#f0faff; --muted:#8195a7; --stroke:rgba(182,229,255,.18); --edge:rgba(182,229,255,.09); --cyan:#82f0ff; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body {height:100%;margin:0;overflow:hidden;overscroll-behavior:none;background:#02050b;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;}
+    button,input {font:inherit;}
+    #stage { position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab; }
+    #stage:active {cursor:grabbing;}
+    body:after {content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,4,12,.26),transparent 21%, transparent 66%, rgba(0,3,9,.22));z-index:1;}
+    .interface {position:fixed;inset:0;z-index:2;pointer-events:none;}
+    .header {position:absolute;top:0;left:0;right:0; padding:calc(env(safe-area-inset-top) + 24px) 25px 0; display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}
+    .identity {display:flex;align-items:center;gap:11px;}
+    .logo {width:28px;height:28px;border:1px solid rgba(125,238,255,.65);border-radius:50%;display:grid;place-items:center;box-shadow:0 0 26px rgba(26,180,233,.16),inset 0 0 18px rgba(26,180,233,.08);}
+    .logo:before {content:"";width:12px;height:12px;border:1.5px solid #91e8ff;border-radius:50%;box-shadow:0 0 12px rgba(129,232,255,.65);}
+    .brand {font-size:12px;font-weight:800;letter-spacing:.22em;line-height:1.1;}
+    .eyebrow {font-size:8px;font-weight:600;letter-spacing:.2em;color:#7791a7;margin-top:5px;}
+    .tools {display:flex;gap:7px;align-items:center;pointer-events:auto;}
+    .icon-btn {width:35px;height:35px;border-radius:50%;border:1px solid var(--stroke);color:#b1d9e7;background:rgba(10,24,37,.47);display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);}
+    .icon-btn:active,.tilt:active,.tab:active {transform:scale(.96);}
+    .icon-btn svg {width:17px;height:17px;}
+    .side-index {position:absolute;right:25px;top:38%;display:flex;flex-direction:column;align-items:center;gap:9px;}
+    .side-index .vertical {writing-mode:vertical-rl;transform:rotate(180deg);font-size:8px;letter-spacing:.24em;color:#57758d;}
+    .side-index .line {height:36px;width:1px;background:linear-gradient(#82f0ff,transparent);}
+    .focus-mark {position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);width:10px;height:10px;opacity:.33;}
+    .focus-mark:before,.focus-mark:after {content:"";position:absolute;background:rgba(165,236,255,.65);}
+    .focus-mark:before {height:1px;width:10px;top:4.5px;left:0;}
+    .focus-mark:after {width:1px;height:10px;left:4.5px;top:0;}
+    .footer {position:absolute;bottom:0;left:0;right:0;padding:0 25px calc(env(safe-area-inset-bottom) + 21px);}
+    .live-tag {font-size:9px;font-weight:700;letter-spacing:.2em;color:#91eaf8;display:flex;align-items:center;gap:8px;text-transform:uppercase;margin-bottom:9px;}
+    .led {width:5px;height:5px;border-radius:100%;background:#7ff9e9;box-shadow:0 0 10px #49e1db;}
+    h1 {font-weight:580;font-size:clamp(26px,7vw,40px);line-height:1.06;letter-spacing:-.045em;margin:0 0 9px;color:#eaf7ff;text-shadow:0 2px 30px rgba(2,5,12,.8);}
+    #description {font-size:12px;line-height:1.5;color:#97abbc;max-width:300px;min-height:36px;margin:0 0 22px;}
+    .mode-tabs {pointer-events:auto;border:1px solid var(--stroke);background:rgba(5,19,31,.72);border-radius:17px;padding:5px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;backdrop-filter:blur(25px);-webkit-backdrop-filter:blur(25px);box-shadow:0 8px 40px rgba(0,0,0,.27),inset 0 1px 0 rgba(255,255,255,.03);}
+    .tab {padding:13px 5px;border:0;border-radius:12px;color:#7d98aa;font-size:10px;letter-spacing:.13em;font-weight:750;background:transparent;cursor:pointer;transition:background .25s,color .25s,transform .2s;}
+    .tab.active {color:#e5fbff;background:linear-gradient(180deg,rgba(72,137,164,.31),rgba(38,81,102,.20));box-shadow:inset 0 1px 0 rgba(169,236,255,.19),0 2px 12px rgba(0,0,0,.15);}
+    .controls {display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;pointer-events:auto;}
+    .tilt {display:flex;align-items:center;gap:9px;min-height:35px;padding:0 12px;border:1px solid rgba(141,217,233,.27);color:#b4e5f0;background:rgba(15,37,52,.48);border-radius:999px;font-size:10px;font-weight:720;letter-spacing:.09em;cursor:pointer;white-space:nowrap;}
+    .tilt .tilt-dot {height:7px;width:7px;border:1px solid currentColor;border-radius:50%;position:relative;}
+    .tilt .tilt-dot:after {content:"";height:3px;width:3px;position:absolute;left:1px;top:1px;background:currentColor;border-radius:50%;}
+    .tilt.on {border-color:rgba(114,246,217,.40);color:#a1ffe9;}
+    .depth-wrap {display:flex;align-items:center;gap:10px;min-width:0;max-width:180px;flex:1;}
+    .depth-label {font-size:9px;font-weight:750;letter-spacing:.13em;color:#86a1b3;}
+    #depth {appearance:none;-webkit-appearance:none;flex:1;min-width:0;height:2px;border:0;border-radius:4px;outline:0;background:linear-gradient(to right,#60d9e7 0%,#75d4de 78%,rgba(120,159,184,.25) 78%,rgba(120,159,184,.25) 100%);}
+    #depth::-webkit-slider-thumb {appearance:none;-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:#c9fbff;border:3px solid #13323f;box-shadow:0 0 0 1px #72ddec,0 0 16px rgba(114,221,236,.3);}
+    #depth::-moz-range-thumb {width:12px;height:12px;border-radius:50%;border:2px solid #13323f;background:#c9fbff;}
+    .num {font-size:10px;font-variant-numeric:tabular-nums;color:#c0e8f3;min-width:26px;text-align:right;}
+    .hint {font-size:9px;color:#4d677b;text-align:center;letter-spacing:.07em;margin-top:17px;line-height:1.5;}
+    .modal-backdrop {position:fixed;inset:0;z-index:9;display:grid;align-items:end;background:rgba(0,6,14,.5);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;visibility:hidden;transition:opacity .28s,visibility .28s;pointer-events:auto;}
+    .modal-backdrop.open {opacity:1;visibility:visible;}
+    .sheet {background:linear-gradient(160deg,#0d1c2a,#05101c 68%);border:1px solid rgba(165,236,255,.16);border-bottom:0;border-radius:27px 27px 0 0;padding:24px 27px calc(env(safe-area-inset-bottom) + 26px);box-shadow:0 -24px 75px rgba(0,0,0,.48);transform:translateY(20px);transition:transform .28s;}
+    .modal-backdrop.open .sheet {transform:translateY(0);}
+    .sheet-head {display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:15px;}
+    .sheet-head h2 {font-size:24px;letter-spacing:-.04em;margin:0;font-weight:620;}
+    .sheet p {color:#9baebb;font-size:13px;line-height:1.6;margin:12px 0;}
+    .cue {display:grid;grid-template-columns:26px 1fr;column-gap:11px;margin-top:14px;align-items:start;}
+    .cue b {font-size:11px;letter-spacing:.1em;color:#cff5ff;display:block;margin-bottom:4px;}
+    .cue span {font-size:12px;color:#91a7ba;line-height:1.45;display:block;}
+    .cue-num {color:#72e7f2;font-size:10px;font-weight:700;letter-spacing:.1em;margin-top:2px;}
+    .note {font-size:11px !important;color:#718ba0!important;border-top:1px solid rgba(170,230,250,.13);padding-top:14px;margin-top:19px!important;}
+    .error {position:fixed;inset:0;z-index:5;display:none;align-items:center;justify-content:center;text-align:center;padding:30px;background:#030a14;color:#bde9f5;}
+    .error strong {display:block;font-size:20px;margin-bottom:8px;}
+    .error p {font-size:13px;line-height:1.5;color:#90a7b8;}
+    @media (min-width:750px) {
+      .header {padding:36px 47px 0;}
+      .footer {padding:0 47px 38px;max-width:630px;}
+      .side-index {right:47px;}
+      .footer h1 {font-size:41px;}
+      #description {min-height:0;}
+      .hint {text-align:left;}
+      .sheet {max-width:540px;margin:0 auto;border-radius:27px 27px 0 0;}
+    }
+    @media (max-height:740px) and (orientation:landscape) {
+      .header {padding:calc(env(safe-area-inset-top) + 12px) calc(env(safe-area-inset-right) + 22px) 0 calc(env(safe-area-inset-left) + 22px);}
+      .footer {width:min(340px,42vw);padding:0 0 calc(env(safe-area-inset-bottom) + 13px) calc(env(safe-area-inset-left) + 22px);}
+      .footer h1 {font-size:24px;}
+      .footer #description {margin-bottom:12px;min-height:0;font-size:10px;}
+      .footer .live-tag {margin-bottom:4px;}
+      .footer .controls {margin-top:10px;flex-wrap:wrap;}
+      .footer .hint {display:none;}
+      .tab {padding:9px 3px;}
+      .side-index {display:none;}
+    }
+    @media (prefers-reduced-motion:reduce) { .led {box-shadow:none;} .tab,.modal-backdrop,.sheet {transition:none;} }
+  </style>
+</head>
+<body>
+<canvas id="stage" aria-label="Interactive three-dimensional illusion visualization; drag to shift perspective"></canvas>
+<div class="interface">
+  <header class="header">
+    <div class="identity"><div class="logo" aria-hidden="true"></div><div><div class="brand">DEEPFIELD</div><div class="eyebrow">PERCEPTION EXPERIMENT</div></div></div>
+    <div class="tools">
+      <button class="icon-btn" id="pauseBtn" type="button" aria-label="Pause animation" title="Pause animation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path class="pause-icon" d="M8 5v14M16 5v14" stroke-linecap="round"/></svg>
+      </button>
+      <button class="icon-btn" id="infoBtn" type="button" aria-label="About the depth illusion" title="Why it looks 3D">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg>
+      </button>
+    </div>
+  </header>
+  <div class="side-index" aria-hidden="true"><span class="vertical">MONOCULAR / DEPTH / 001</span><span class="line"></span></div>
+  <div class="focus-mark" aria-hidden="true"></div>
+  <footer class="footer">
+    <div class="live-tag"><span class="led"></span><span id="label">01 &nbsp; KINETIC DEPTH</span></div>
+    <h1 id="headline">Space from motion.</h1>
+    <p id="description">Your visual system reconstructs volume as surfaces rotate, overlap and change their shading.</p>
+    <div class="mode-tabs" role="tablist" aria-label="Depth illusion mode">
+      <button id="mode0" class="tab active" role="tab" aria-selected="true">SCULPTURE</button>
+      <button id="mode1" class="tab" role="tab" aria-selected="false">INFINITY</button>
+      <button id="mode2" class="tab" role="tab" aria-selected="false">LAYERS</button>
+    </div>
+    <div class="controls">
+      <button id="tiltBtn" class="tilt" type="button"><span class="tilt-dot"></span><span id="tiltText">ENABLE TILT</span></button>
+      <label class="depth-wrap" for="depth"><span class="depth-label">DEPTH</span><input id="depth" type="range" min="0" max="100" value="78" aria-label="Viewpoint parallax strength"><span class="num" id="depthNumber">78</span></label>
+    </div>
+    <div class="hint" id="hint">DRAG THE SCENE TO CHANGE VIEWPOINT · NO CAMERA REQUIRED</div>
+  </footer>
+</div>
+<div id="overlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="About the illusion" aria-hidden="true">
+ <div class="sheet">
+  <div class="sheet-head"><h2>Why it feels three-dimensional.</h2><button class="icon-btn" id="closeBtn" aria-label="Close explanation" type="button">✕</button></div>
+  <p>One flat OLED panel can create a powerful impression of depth, even though it cannot deliver independent left- and right-eye images by itself.</p>
+  <div class="cue"><span class="cue-num">01</span><div><b>MOTION PARALLAX</b><span>Nearby objects shift faster than distant ones when your viewpoint changes.</span></div></div>
+  <div class="cue"><span class="cue-num">02</span><div><b>OCCLUSION + PERSPECTIVE</b><span>Overlapping surfaces and receding geometry tell the visual system what is in front.</span></div></div>
+  <div class="cue"><span class="cue-num">03</span><div><b>KINETIC DEPTH + SHADING</b><span>Continuous rotation, highlights and edge contrast reveal curved surfaces.</span></div></div>
+  <p class="note">Designed for iPhone 15 Pro Max: OLED blacks, fine detail, responsive animation, safe-area layout and optional device-orientation input. Tilt approximates viewpoint movement; it is not face/head tracking or true stereoscopy. Motion permission generally requires HTTPS in Safari.</p>
+ </div>
+</div>
+<div class="error" id="error"><div><strong>WebGL2 is unavailable.</strong><p>Open this page in an up-to-date Safari browser with hardware acceleration enabled.</p></div></div>
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('stage');
+  const gl = canvas.getContext('webgl2',{alpha:false,antialias:true,depth:true,stencil:false,powerPreference:'high-performance',preserveDrawingBuffer:false});
+  if(!gl){document.getElementById('error').style.display='flex';return;}
+  // Display-P3 framebuffer is an optional enhancement, not an HDR promise.
+  try{if('drawingBufferColorSpace' in gl)gl.drawingBufferColorSpace='display-p3';}catch(_){}
+  const $=id=>document.getElementById(id);
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const mix=(a,b,t)=>a+(b-a)*t;
+  const rot0=()=>new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+  const matMul=(a,b)=>{const o=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++)for(let k=0;k<4;k++)o[c*4+r]+=a[k*4+r]*b[c*4+k];return o;};
+  const translate=(x,y,z)=>{const m=rot0();m[12]=x;m[13]=y;m[14]=z;return m;};
+  const scale=(x,y,z)=>{const m=rot0();m[0]=x;m[5]=y;m[10]=z;return m;};
+  const rx=a=>{const m=rot0(),c=Math.cos(a),s=Math.sin(a);m[5]=c;m[6]=s;m[9]=-s;m[10]=c;return m;};
+  const ry=a=>{const m=rot0(),c=Math.cos(a),s=Math.sin(a);m[0]=c;m[2]=-s;m[8]=s;m[10]=c;return m;};
+  const rz=a=>{const m=rot0(),c=Math.cos(a),s=Math.sin(a);m[0]=c;m[1]=s;m[4]=-s;m[5]=c;return m;};
+  const model=(x,y,z,s,ax=0,ay=0,az=0)=>matMul(translate(x,y,z),matMul(ry(ay),matMul(rx(ax),matMul(rz(az),scale(s,s,s)))));
+  const length=v=>Math.hypot(...v);
+  const normalize=v=>{const l=length(v)||1;return v.map(x=>x/l);};
+  const subtract=(a,b)=>a.map((x,i)=>x-b[i]);
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  function lookAt(e,t,up){const z=normalize(subtract(e,t)),x=normalize(cross(up,z)),y=cross(z,x);const m=rot0();m[0]=x[0];m[1]=y[0];m[2]=z[0];m[4]=x[1];m[5]=y[1];m[6]=z[1];m[8]=x[2];m[9]=y[2];m[10]=z[2];m[12]=-x[0]*e[0]-x[1]*e[1]-x[2]*e[2];m[13]=-y[0]*e[0]-y[1]*e[1]-y[2]*e[2];m[14]=-z[0]*e[0]-z[1]*e[1]-z[2]*e[2];return m;}
+  function perspective(fov,aspect,near,far){const f=1/Math.tan(fov/2),m=new Float32Array(16);m[0]=f/aspect;m[5]=f;m[10]=(far+near)/(near-far);m[11]=-1;m[14]=(2*far*near)/(near-far);return m;}
+  const compile=(type,source)=>{const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){throw Error(gl.getShaderInfoLog(s));}return s;};
+  function program(v,f){const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,v));gl.attachShader(p,compile(gl.FRAGMENT_SHADER,f));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));return p;}
+
+  const bgVS=`#version 300 es
+  precision highp float;
+  out vec2 vUv;
+  void main(){vec2 p=vec2((gl_VertexID==1)?3.0:-1.0,(gl_VertexID==2)?3.0:-1.0);vUv=p*.5+.5;gl_Position=vec4(p,0,1);}`;
+  const bgFS=`#version 300 es
+  precision highp float;
+  in vec2 vUv;out vec4 frag;
+  uniform vec2 uResolution,uShift;uniform float uTime,uMode;
+  float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+  void main(){
+    vec2 uv=vUv, q=vec2((uv.x-.5)*uResolution.x/uResolution.y,uv.y-.53);
+    q-=uShift*.017;
+    float r=length(q);
+    vec3 col=vec3(.0024,.0055,.011);
+    col+=vec3(.010,.035,.058)*exp(-r*r*17.);
+    col+=vec3(.016,.006,.038)*exp(-length(q-vec2(-.22,.14))*length(q-vec2(-.22,.14))*19.);
+    col+=vec3(.002,.022,.037)*exp(-length(q-vec2(.21,-.18))*length(q-vec2(.21,-.18))*28.);
+    float ring=exp(-pow((r-(.23+.008*sin(uTime*.23)))*23.,2.));
+    col+=ring*vec3(.006,.022,.035)*(1.-.6*min(1.,uMode));
+    float vig=pow(clamp(1.-length((uv-.5)*vec2(.98,.7))*.83,0.,1.),1.7);
+    col*=vig;
+    float grain=(hash(floor(uv*uResolution*.60)+floor(uTime*7.))-.5)*.004;
+    col+=grain;
+    frag=vec4(max(col,0.),1.);
+  }`;
+
+  const meshVS=`#version 300 es
+  precision highp float;
+  layout(location=0)in vec3 aPos;
+  layout(location=1)in vec3 aNormal;
+  uniform mat4 uVP,uModel;
+  out vec3 vPos,vNormal;
+  void main(){vec4 w=uModel*vec4(aPos,1.);vPos=w.xyz;vNormal=normalize(mat3(uModel)*aNormal);gl_Position=uVP*w;}`;
+  const meshFS=`#version 300 es
+  precision highp float;
+  in vec3 vPos,vNormal;out vec4 frag;
+  uniform vec3 uEye,uColor,uAccent;
+  uniform float uTime,uOpacity,uPulse;
+  uniform int uMaterial;
+  void main(){
+    vec3 n=normalize(vNormal),v=normalize(uEye-vPos),l=normalize(vec3(-.45,.76,1.)),l2=normalize(vec3(.8,-.38,-.35));
+    float nv=clamp(dot(n,v),0.,1.);
+    float fres=pow(1.-abs(dot(n,v)),2.1);
+    float diff=max(dot(n,l),0.),diff2=max(dot(n,l2),0.);
+    float spec=pow(max(dot(reflect(-l,n),v),0.),78.);
+    float spec2=pow(max(dot(reflect(-l2,n),v),0.),28.);
+    float band=.5+.5*sin(vPos.y*5.+vPos.x*2.1+vPos.z*1.7+uTime*.32);
+    vec3 color=mix(uColor,uAccent,band*.57+.10);
+    float a=uOpacity;
+    if(uMaterial==0){ // deep glossy volume with bright Fresnel rim and internal contours
+      float swirl=.5+.5*sin(atan(vPos.y,vPos.x)*8. +vPos.z*13.+uTime*.65);
+      vec3 dark=mix(vec3(.006,.014,.042),color*.20,swirl*.45);
+      color=dark+color*(.12*diff+.10*diff2+.62*fres)+vec3(.65,.93,1.)*spec*.88+uAccent*spec2*.29;
+      color+=uAccent*pow(1.-abs(dot(n,v)),6.)*.20;
+    }else if(uMaterial==1){ // satin metal / luminous ribbons
+      color=color*(.26+.65*diff+.18*diff2)+vec3(.75,.97,1.)*spec*.98+uAccent*spec2*.44+color*fres*.56;
+    }else if(uMaterial==2){ // luminous rings
+      color=color*(.25+.55*diff+1.15*fres)+vec3(.9,1.,1.)*spec*.56+color*pow(fres,2.)*.7;
+    }else{ // glass planes
+      float scan=.5+.5*sin(vPos.y*23.+vPos.x*14.+uTime*.26);
+      color=color*(.11+.14*diff+.32*fres)+color*scan*.045+vec3(.6,.95,1.)*spec*.47;
+      a*=.54+.35*fres;
+    }
+    color+=uColor*uPulse*.29;
+    frag=vec4(max(color,vec3(0.)),a);
+  }`;
+
+  const starVS=`#version 300 es
+  precision highp float;
+  layout(location=0)in vec3 aPos;
+  layout(location=1)in float aSize;
+  layout(location=2)in float aHue;
+  uniform mat4 uVP,uView;
+  uniform float uPxScale,uTime,uMode;
+  out float vHue,vEnergy;
+  void main(){vec4 p=uView*vec4(aPos,1.);gl_Position=uVP*vec4(aPos,1.);float z=max(-p.z,1.);gl_PointSize=clamp(aSize*uPxScale*7.0/z,1.0,35.0);vHue=aHue;vEnergy=clamp(11.0/z,.17,1.8);}`;
+  const starFS=`#version 300 es
+  precision highp float;
+  in float vHue,vEnergy;out vec4 frag;
+  uniform float uTime;
+  void main(){vec2 q=gl_PointCoord*2.-1.;float r=dot(q,q);if(r>1.)discard;float core=exp(-r*19.),halo=exp(-r*3.8);vec3 color=mix(vec3(.16,.66,1.),vec3(1.,.52,.69),vHue);color=mix(color,vec3(.76,1.,1.),core*.52);float energy=(core*.62+halo*.17)*vEnergy;frag=vec4(color*energy,energy);}`;
+
+  const lineVS=`#version 300 es
+  precision highp float;
+  layout(location=0)in vec3 aPos;
+  uniform mat4 uVP,uModel;
+  out float vFog;
+  void main(){vec3 p=(uModel*vec4(aPos,1.)).xyz;gl_Position=uVP*vec4(p,1.);vFog=clamp((p.z+16.)/17.,0.,1.);}`;
+  const lineFS=`#version 300 es
+  precision highp float;
+  in float vFog;out vec4 frag;uniform vec3 uColor;uniform float uOpacity;
+  void main(){float a=uOpacity*(.16+.84*vFog);frag=vec4(uColor*a,a);}`;
+  const bgP=program(bgVS,bgFS),meshP=program(meshVS,meshFS),starP=program(starVS,starFS),lineP=program(lineVS,lineFS);
+  const loc=(p,n)=>gl.getUniformLocation(p,n);
+  const bu={res:loc(bgP,'uResolution'),shift:loc(bgP,'uShift'),time:loc(bgP,'uTime'),mode:loc(bgP,'uMode')};
+  const mu={vp:loc(meshP,'uVP'),model:loc(meshP,'uModel'),eye:loc(meshP,'uEye'),color:loc(meshP,'uColor'),accent:loc(meshP,'uAccent'),time:loc(meshP,'uTime'),opacity:loc(meshP,'uOpacity'),material:loc(meshP,'uMaterial'),pulse:loc(meshP,'uPulse')};
+  const pu={vp:loc(starP,'uVP'),view:loc(starP,'uView'),px:loc(starP,'uPxScale'),time:loc(starP,'uTime'),mode:loc(starP,'uMode')};
+  const lu={vp:loc(lineP,'uVP'),model:loc(lineP,'uModel'),color:loc(lineP,'uColor'),opacity:loc(lineP,'uOpacity')};
+  function geometry(pos,norm,idx){
+    const vao=gl.createVertexArray();gl.bindVertexArray(vao);
+    const vbo=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+    const data=new Float32Array(pos.length/3*6);
+    for(let i=0;i<pos.length/3;i++){data.set(pos.slice(i*3,i*3+3),i*6);data.set(norm.slice(i*3,i*3+3),i*6+3);}
+    gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,24,0);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,3,gl.FLOAT,false,24,12);
+    const ibo=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ibo);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(idx),gl.STATIC_DRAW);
+    gl.bindVertexArray(null);return {vao,ct:idx.length};
+  }
+  function torus(radius,tube,radial=130,tubular=12){let pos=[],norm=[],idx=[];
+    for(let i=0;i<=radial;i++){const u=i/radial*Math.PI*2,cu=Math.cos(u),su=Math.sin(u);
+      for(let j=0;j<=tubular;j++){const v=j/tubular*Math.PI*2,cv=Math.cos(v),sv=Math.sin(v);pos.push((radius+tube*cv)*cu,(radius+tube*cv)*su,tube*sv);norm.push(cv*cu,cv*su,sv);}
+    }
+    for(let i=0;i<radial;i++)for(let j=0;j<tubular;j++){const a=i*(tubular+1)+j,b=(i+1)*(tubular+1)+j;idx.push(a,b,a+1,b,b+1,a+1);}return geometry(pos,norm,idx);
+  }
+  function sphere(r,longitude=48,latitude=36){let pos=[],norm=[],idx=[];
+    for(let y=0;y<=latitude;y++){const a=y/latitude*Math.PI;
+      for(let x=0;x<=longitude;x++){const t=x/longitude*Math.PI*2,xx=Math.sin(a)*Math.cos(t),yy=Math.cos(a),zz=Math.sin(a)*Math.sin(t);norm.push(xx,yy,zz);pos.push(xx*r,yy*r,zz*r);}
+    }
+    for(let y=0;y<latitude;y++)for(let x=0;x<longitude;x++){const a=y*(longitude+1)+x,b=(y+1)*(longitude+1)+x;idx.push(a,a+1,b,b,a+1,b+1);}return geometry(pos,norm,idx);
+  }
+  function knotPath(t){const p=2,q=3,R=.87+.30*Math.cos(q*t);return [R*Math.cos(p*t),R*Math.sin(p*t),.30*Math.sin(q*t)];}
+  function knot(samples=320,tubeSeg=13,tube=.116){let pos=[],norm=[],idx=[];const eps=.0001;
+    for(let i=0;i<=samples;i++){const t=i/samples*Math.PI*2,center=knotPath(t),tan=normalize(subtract(knotPath(t+eps),knotPath(t-eps)));
+      let b=normalize(cross(tan,[0,0,1]));if(length(b)<.001)b=[1,0,0];const n=normalize(cross(b,tan));
+      for(let j=0;j<=tubeSeg;j++){const v=j/tubeSeg*Math.PI*2,nn=n.map((e,k)=>e*Math.cos(v)+b[k]*Math.sin(v));pos.push(...center.map((e,k)=>e+tube*nn[k]));norm.push(...nn);}
+    }
+    for(let i=0;i<samples;i++)for(let j=0;j<tubeSeg;j++){const a=i*(tubeSeg+1)+j,b=(i+1)*(tubeSeg+1)+j;idx.push(a,a+1,b,b,a+1,b+1);}return geometry(pos,norm,idx);
+  }
+  function pane(width=1.7,height=2.15){let x=width/2,y=height/2;return geometry([-x,-y,0,x,-y,0,x,y,0,-x,y,0],[0,0,1,0,0,1,0,0,1,0,0,1],[0,1,2,0,2,3]);}
+  function panelTube(w=1.78,h=2.26,r=.16,tube=.016){
+    // Rounded rectangular metal/glass bezel, swept with an actual 3-D cross section.
+    const centers=[[w/2-r,h/2-r,0],[-w/2+r,h/2-r,90],[-w/2+r,-h/2+r,180],[w/2-r,-h/2+r,270]];
+    const curve=[];
+    for(const [cx,cy,degrees] of centers)for(let j=0;j<=15;j++){
+      const a=(degrees+j*6)*Math.PI/180;
+      curve.push([cx+r*Math.cos(a),cy+r*Math.sin(a),0]);
+    }
+    const sides=8,points=[],normal=[],idx=[];
+    for(let i=0;i<curve.length;i++){
+      const p=curve[i],prev=curve[(i-1+curve.length)%curve.length],next=curve[(i+1)%curve.length];
+      const tangent=normalize(subtract(next,prev)),out=normalize([tangent[1],-tangent[0],0]);
+      for(let j=0;j<=sides;j++){
+        const v=j/sides*Math.PI*2,nn=[out[0]*Math.cos(v),out[1]*Math.cos(v),Math.sin(v)];
+        points.push(...p.map((x,k)=>x+tube*nn[k]));normal.push(...nn);
+      }
+    }
+    for(let i=0;i<curve.length;i++)for(let j=0;j<sides;j++){
+      const a=i*(sides+1)+j,b=((i+1)%curve.length)*(sides+1)+j;
+      idx.push(a,b,a+1,b,b+1,a+1);
+    }
+    return geometry(points,normal,idx);
+  }
+  const G={sphere:sphere(.64),knot:knot(),ring:torus(1.47,.025),ringFat:torus(1.44,.060),ringSmall:torus(.84,.017),pane:pane(),paneBezel:panelTube()};
+  function lineGeometry(pos){const vao=gl.createVertexArray();gl.bindVertexArray(vao);const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(pos),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,12,0);gl.bindVertexArray(null);return {vao,ct:pos.length/3};}
+  const grid=[];for(let x=-12;x<=12;x++){grid.push(x,-2.25,-20,x,-2.25,2.5);}for(let z=-20;z<=2.5;z+=1.15){grid.push(-12,-2.25,z,12,-2.25,z);}const GRID=lineGeometry(grid);
+  let frame=[];const rounded=(w,h,r,z)=>{
+    const points=[];for(let c=0;c<4;c++){const cx=(c===0||c===3)?w/2-r:-w/2+r,cy=(c<=1)?h/2-r:-h/2+r,start=c*Math.PI/2;
+      for(let i=0;i<=11;i++){const a=start+i/11*Math.PI/2;points.push([cx+r*Math.cos(a),cy+r*Math.sin(a),z]);}
+    }
+    for(let i=0;i<points.length;i++)frame.push(...points[i],...points[(i+1)%points.length]);
+  };
+  // Rounded panel border built clockwise from upper-right corner.
+  frame=[];const wp=1.78,hp=2.26,cr=.16;const corners=[[wp/2-cr,hp/2-cr,0],[ -wp/2+cr,hp/2-cr,90],[-wp/2+cr,-hp/2+cr,180],[wp/2-cr,-hp/2+cr,270]];
+  const outline=[];for(const [cx,cy,deg]of corners)for(let i=0;i<=10;i++){let a=(deg+i*9)*Math.PI/180;outline.push([cx+cr*Math.cos(a),cy+cr*Math.sin(a),0]);}
+  // Border visually consists of connected coordinates; orientation need not affect the depth illusion.
+  for(let i=0;i<outline.length;i++)frame.push(...outline[i],...outline[(i+1)%outline.length]);
+  const PANEL_FRAME=lineGeometry(frame);
+  let rngSeed=341339;function rand(){rngSeed=(rngSeed*1664525+1013904223)>>>0;return rngSeed/4294967296;}
+  const stars=[];
+  for(let i=0;i<730;i++){const layer=rand(),x=(rand()-.5)*(layer<.2?4.2:12.0),y=(rand()-.5)*(layer<.2?6:12.0),z=layer<.2?(rand()*3.0+1.1):(-2.-rand()*24);const size=(layer<.2?.7:1.0)+rand()*2.0;stars.push(x,y,z,size,rand());}
+  function starGeometry(data){const vao=gl.createVertexArray();gl.bindVertexArray(vao);const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,20,0);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,1,gl.FLOAT,false,20,12);gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,1,gl.FLOAT,false,20,16);gl.bindVertexArray(null);return {vao,ct:data.length/5};}
+  const STARS=starGeometry(stars);
+  const dots=[];for(let i=0;i<150;i++){let t=rand()*Math.PI*2,theta=rand()*Math.PI*2,r=.8+rand()*1.2;dots.push(r*Math.cos(theta)*Math.cos(t),r*Math.sin(t),r*Math.sin(theta)*Math.cos(t),1+rand()*2.7,rand());}
+  const ORBIT_DOTS=starGeometry(dots);
+  const modes=[
+    {lab:'01   KINETIC DEPTH',head:'Space from motion.',desc:'Your visual system reconstructs volume as surfaces rotate, overlap and change their shading.'},
+    {lab:'02   LINEAR PERSPECTIVE',head:'Look into infinity.',desc:'Receding rings, changing angular size and optic flow turn the screen into a deep corridor.'},
+    {lab:'03   MOTION PARALLAX',head:'Depth between layers.',desc:'Nearby transparent planes displace more than distant ones when you shift your viewpoint.'}
+  ];
+  let mode=0,depth=.78,motionEnabled=false,motionZero=null,motionRaw=[0,0],pointer=[0,0],dragging=false,paused=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let current=[0,0],t=0,last=0,elapsed=0,burst=0,dpr=1.7,sw=0,sh=0,aspect=1;
+  function changeMode(n){mode=n;modes.forEach((_,i)=>{const el=$('mode'+i);el.classList.toggle('active',i===n);el.setAttribute('aria-selected',i===n?'true':'false');});$('label').innerHTML=modes[n].lab;$('headline').textContent=modes[n].head;$('description').textContent=modes[n].desc;burst=1;}
+  for(let i=0;i<3;i++)$('mode'+i).addEventListener('click',()=>changeMode(i));
+  $('depth').addEventListener('input',e=>{depth=Number(e.target.value)/100;$('depthNumber').textContent=e.target.value; e.target.style.background=`linear-gradient(to right,#60d9e7 0%,#75d4de ${e.target.value}%,rgba(120,159,184,.25) ${e.target.value}%,rgba(120,159,184,.25) 100%)`;});
+  const info=$('overlay');function showInfo(show){info.classList.toggle('open',show);info.setAttribute('aria-hidden',show?'false':'true');}
+  $('infoBtn').addEventListener('click',()=>showInfo(true));$('closeBtn').addEventListener('click',()=>showInfo(false));info.addEventListener('click',e=>{if(e.target===info)showInfo(false);});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')showInfo(false);if(e.key==='1')changeMode(0);if(e.key==='2')changeMode(1);if(e.key==='3')changeMode(2);});
+  const pauseIcon=()=>{$('pauseBtn').innerHTML=paused?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 5l12 7-12 7z"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 5v14M16 5v14"/></svg>';$('pauseBtn').setAttribute('aria-label',paused?'Resume animation':'Pause animation');};
+  $('pauseBtn').addEventListener('click',()=>{paused=!paused;pauseIcon();});pauseIcon();
+  const onOrientation=e=>{
+    if(e.gamma==null||e.beta==null)return;
+    if(!motionZero){motionZero=[e.gamma,e.beta];return;}
+    // Bounded relative angular motion; never claims to recover actual viewer head position.
+    let dx=clamp((e.gamma-motionZero[0])/17,-1,1),dy=clamp((e.beta-motionZero[1])/20,-1,1);
+    let a=(screen.orientation?.angle||window.orientation||0);
+    if(Math.abs(a)===90){const p=dx;dx=dy*(a>0?1:-1);dy=-p*(a>0?1:-1);}
+    motionRaw[0]=dx;motionRaw[1]=dy;
+  };
+  $('tiltBtn').addEventListener('click',async()=>{
+    if(motionEnabled){motionEnabled=false;$('tiltBtn').classList.remove('on');$('tiltText').textContent='ENABLE TILT';window.removeEventListener('deviceorientation',onOrientation);return;}
+    try{
+      if(typeof DeviceOrientationEvent==='undefined')throw Error('no orientation API');
+      if(typeof DeviceOrientationEvent.requestPermission==='function'){
+        const p=await DeviceOrientationEvent.requestPermission();if(p!=='granted')throw Error('permission '+p);
+      }
+      motionZero=null;motionRaw=[0,0];motionEnabled=true;window.addEventListener('deviceorientation',onOrientation);
+      $('tiltBtn').classList.add('on');$('tiltText').textContent='TILT ON';$('hint').textContent='TILT YOUR IPHONE · DRAG TO OVERRIDE';
+    }catch(e){$('tiltText').textContent='USE TOUCH INSTEAD';$('hint').textContent='SENSOR ACCESS NEEDS HTTPS + SAFARI PERMISSION; DRAG STILL WORKS';setTimeout(()=>{if(!motionEnabled)$('tiltText').textContent='ENABLE TILT';},3800);}
+  });
+  canvas.addEventListener('pointerdown',e=>{dragging=true;canvas.setPointerCapture(e.pointerId);pointer=[(e.clientX/window.innerWidth-.5)*2,(e.clientY/window.innerHeight-.5)*2];burst=Math.max(burst,.5);});
+  canvas.addEventListener('pointermove',e=>{if(!dragging)return;pointer=[clamp((e.clientX/window.innerWidth-.5)*2,-1,1),clamp((e.clientY/window.innerHeight-.5)*2,-1,1)];});
+  const endDrag=()=>{dragging=false;};canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);canvas.addEventListener('lostpointercapture',endDrag);
+  canvas.addEventListener('dblclick',()=>{motionZero=null;pointer=[0,0];burst=1;});
+  window.addEventListener('orientationchange',()=>{motionZero=null;});
+  function resize(){const w=window.innerWidth,h=window.innerHeight;dpr=Math.min(window.devicePixelRatio||1,1.8);const maxPx=1700000;dpr=Math.min(dpr,Math.sqrt(maxPx/(w*h)));canvas.width=Math.max(2,Math.floor(w*dpr));canvas.height=Math.max(2,Math.floor(h*dpr));sw=canvas.width;sh=canvas.height;aspect=w/h;gl.viewport(0,0,sw,sh);}
+  window.addEventListener('resize',resize,{passive:true});resize();
+  gl.clearColor(0,0,0,1);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);
+  function drawMesh(g,m,color,accent,mat=1,opacity=1,pulse=0){gl.uniformMatrix4fv(mu.model,false,m);gl.uniform3fv(mu.color,color);gl.uniform3fv(mu.accent,accent);gl.uniform1i(mu.material,mat);gl.uniform1f(mu.opacity,opacity);gl.uniform1f(mu.pulse,pulse);gl.bindVertexArray(g.vao);gl.drawElements(gl.TRIANGLES,g.ct,gl.UNSIGNED_INT,0);}
+  function drawLine(g,m,color,a){gl.uniformMatrix4fv(lu.model,false,m);gl.uniform3fv(lu.color,color);gl.uniform1f(lu.opacity,a);gl.bindVertexArray(g.vao);gl.drawArrays(gl.LINES,0,g.ct);}
+  const cyan=[.17,.75,.96],violet=[.56,.28,.96],rose=[.98,.30,.57],gold=[1.,.65,.30],blue=[.05,.26,.48];
+  function render(stamp){
+    const now=stamp*.001,dt=last?Math.min(now-last,.05):.016;last=now;if(!paused)t+=dt;elapsed+=dt;
+    if(!dragging){pointer[0]*=.965;pointer[1]*=.965;}
+    const auto=[Math.sin(t*.21)*.15,Math.cos(t*.17)*.12];
+    const target=dragging?pointer:motionEnabled?motionRaw:auto;
+    const smooth=1-Math.exp(-dt*7.0);current[0]=mix(current[0],target[0],smooth);current[1]=mix(current[1],target[1],smooth);burst*=Math.exp(-dt*2.3);
+    const portraitScale=Math.min(1,Math.max(.55,aspect*1.50));
+    const eye=[current[0]*1.05*depth,current[1]*-.72*depth+.06,7.3];
+    // Bias the virtual optical axis slightly upward on compact Safari viewports,
+    // keeping the sculpture clear of the lower controls and the Dynamic Island.
+    const targetY=aspect<1?-clamp((850-window.innerHeight)/380,0,.36):0;
+    const view=lookAt(eye,[0,targetY,0],[0,1,0]);
+    const proj=perspective(46*Math.PI/180,aspect,.12,75);const vp=matMul(proj,view);
+    gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.useProgram(bgP);gl.uniform2f(bu.res,sw,sh);gl.uniform2f(bu.shift,current[0],current[1]);gl.uniform1f(bu.time,t);gl.uniform1f(bu.mode,mode);gl.drawArrays(gl.TRIANGLES,0,3);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    // Deep volumetric star field + subtler foreground sparks.
+    gl.enable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+    gl.useProgram(starP);gl.uniformMatrix4fv(pu.vp,false,vp);gl.uniformMatrix4fv(pu.view,false,view);gl.uniform1f(pu.px,dpr);gl.uniform1f(pu.time,t);gl.uniform1f(pu.mode,mode);gl.bindVertexArray(STARS.vao);gl.drawArrays(gl.POINTS,0,STARS.ct);
+    // Floor lies behind the hero object, converges with distance and moves more slowly.
+    gl.useProgram(lineP);gl.uniformMatrix4fv(lu.vp,false,vp);drawLine(GRID,rot0(),blue,.24);
+    gl.depthMask(true);gl.disable(gl.BLEND);
+    gl.useProgram(meshP);gl.uniformMatrix4fv(mu.vp,false,vp);gl.uniform3fv(mu.eye,eye);gl.uniform1f(mu.time,t);
+    if(mode===0){
+      const s=portraitScale*1.11;
+      // Hollow-looking glossy sphere, visibly covered by an interlaced knot.
+      drawMesh(G.sphere,model(0,0,0,s,0,t*.22,0),cyan,violet,0,1,burst);
+      drawMesh(G.knot,model(0,0,.05,s,t*.24,-t*.32,t*.13),cyan,rose,1,1,burst);
+      gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+      drawMesh(G.ring,model(0,0,0,s,t*.19,t*.3,.2),cyan,blue,2,.42,burst);
+      drawMesh(G.ring,model(0,0,0,s,t*.23+1.0,-t*.21,1.4),violet,rose,2,.39,burst);
+      drawMesh(G.ringFat,model(0,0,0,s,t*.34+.4,-t*.13,2.2),gold,rose,2,.13,burst);
+      drawMesh(G.ringSmall,model(0,0,.1,s*.97,t*.39,t*.41,.4),cyan,violet,2,.28,burst);
+      gl.useProgram(starP);gl.uniformMatrix4fv(pu.vp,false,vp);gl.uniformMatrix4fv(pu.view,false,view);gl.bindVertexArray(ORBIT_DOTS.vao);gl.drawArrays(gl.POINTS,0,ORBIT_DOTS.ct);
+    }else if(mode===1){
+      // Rings are genuine geometry at different world-space distances. The forward
+      // progression induces looming + optic flow without binocular stereopsis.
+      gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+      const phase=t*.98/2.45,whole=Math.floor(phase),frac=phase-whole;
+      for(let i=16;i>=0;i--){
+        const id=i+whole; // index follows the physical ring across successive wrap cycles
+        const z=1.5-i*2.45+frac*2.45;
+        if(z>3.9)continue;
+        const scaleR=1.55 + .09*Math.sin(id*1.31+t*.3);
+        const s=portraitScale*(1+.12*Math.sin(id*.9));
+        const angle=id*.35+t*.13;
+        drawMesh(G.ringFat,model(0,0,z,s*scaleR/1.44,.11*Math.sin(angle),.11*Math.cos(angle),angle),id%3===0?rose:cyan,id%4===0?gold:violet,2,.22+Math.max(0,z+4)*.025,burst);
+        drawMesh(G.ring,model(0,0,z-.16,s*scaleR/1.44,.07*Math.cos(angle),.10*Math.sin(angle),-angle*.65),id%3===0?gold:violet,cyan,2,.35,burst);
+      }
+      // A rotating foreground aperture makes near-vs-far scale obvious.
+      drawMesh(G.ringSmall,model(0,0,.45,portraitScale*1.28,t*.2,t*.24,t*.2),cyan,rose,2,.31,burst);
+    }else{
+      // Separated, partially transparent image planes. Render back to front.
+      const s=portraitScale*.98;
+      gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+      for(let i=0;i<7;i++){
+        const z=-3.5+i*.90,alpha=i/6,drift=Math.sin(t*.30+i*.81);
+        const x=Math.sin(i*1.27)*.22,y=Math.cos(i*1.7)*.14;
+        const m=model(x,y,z,s,Math.sin(t*.20+i*.85)*.09,Math.sin(t*.23+i*.51)*.22,drift*.055);
+        const glass=i%3===0?rose:i%3===1?cyan:violet;
+        gl.useProgram(meshP);drawMesh(G.pane,m,glass,blue,3,.28+alpha*.11,burst);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        drawMesh(G.paneBezel,m,glass,cyan,2,.46+alpha*.26,burst);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+        if(i%2===0){drawMesh(G.ringSmall,model(x,y,z+.03,s*.61,t*.08+i*.1,t*.10+i*.3,t*.14+i*.43),cyan,gold,2,.27+alpha*.12,burst);}
+      }
+    }
+    gl.depthMask(true);gl.disable(gl.BLEND);gl.bindVertexArray(null);
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+  // Export a tiny non-invasive test interface for QA and embedded hosts.
+  window.deepfield={changeMode,setDepth(v){$('depth').value=clamp(v,0,100);$('depth').dispatchEvent(new Event('input'));},getState:()=>({mode,depth,motionEnabled,paused,canvas:[canvas.width,canvas.height]})};
+})();
+</script>
+</body>
+</html>
